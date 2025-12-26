@@ -56,6 +56,10 @@ data/
 .trading_state.json
 .trading_state_*.json
 
+# ML Models (large binary files, regenerated via training)
+trading/ml/models/*.txt
+trading/ml/models/*.bin
+
 # OS
 .DS_Store
 Thumbs.db
