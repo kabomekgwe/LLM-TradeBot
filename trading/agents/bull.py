@@ -18,57 +18,85 @@ class BullAgent(BaseAgent):
     async def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         """Analyze market for bullish opportunities.
 
+        Uses multi-factor technical analysis combining RSI, MACD, and Bollinger Bands
+        from QuantAnalyst to identify bullish opportunities.
+
         Args:
-            context: Must contain "market_data" from DataSyncAgent
+            context: Must contain "quant_analyst" with indicators from QuantAnalystAgent
 
         Returns:
             Context updated with "bull_vote" containing:
                 - "action": "buy" or "hold"
                 - "confidence": Float 0-1
                 - "reasoning": String explanation
+                - "factors": List of contributing factors
 
         Example:
             >>> result = await agent.execute(context)
             >>> result["bull_vote"]["action"]
             'buy'
         """
-        market_data = context.get("market_data", {})
-        if not market_data:
-            raise ValueError("market_data is required in context")
-
         self.log_decision("Analyzing bullish signals")
 
-        # Get recent price action
-        candles_1h = market_data.get("1h", [])
-        if not candles_1h:
-            return {"bull_vote": {"action": "hold", "confidence": 0.0, "reasoning": "No data"}}
+        # Get indicators from QuantAnalyst
+        quant_data = context.get("quant_analyst", {})
+        indicators = quant_data.get("indicators", {})
 
-        # Simple bullish analysis (Phase 1 MVP implementation)
-        # TODO: Full implementation with technical indicators
-        recent_candles = candles_1h[-10:] if len(candles_1h) >= 10 else candles_1h
-        closes = [c.close for c in recent_candles]
+        if not indicators:
+            return {
+                "bull_vote": {
+                    "action": "hold",
+                    "confidence": 0.0,
+                    "reasoning": "No indicator data available",
+                    "factors": []
+                }
+            }
 
-        # Check if price is trending up
-        is_uptrend = closes[-1] > closes[0] if len(closes) > 1 else False
+        # Extract indicator signals
+        rsi = indicators.get("rsi", {})
+        macd = indicators.get("macd", {})
+        bb = indicators.get("bollinger", {})
 
-        # Calculate simple momentum
-        momentum = (closes[-1] - closes[0]) / closes[0] if closes[0] > 0 else 0
+        # Calculate bullish factors (each contributes to confidence)
+        factors = []
+        reasons = []
 
-        if is_uptrend and momentum > 0.02:  # 2% gain
-            action = "buy"
-            confidence = min(abs(momentum) * 10, 0.8)  # Cap at 0.8
-            reasoning = f"Uptrend detected with {momentum*100:.2f}% momentum"
-        else:
-            action = "hold"
-            confidence = 0.3
-            reasoning = "No strong bullish signal"
+        # Factor 1: RSI oversold (strong bullish signal) - 40% weight
+        rsi_value = rsi.get("value", 50)
+        if rsi.get("oversold", False):
+            factors.append(0.4)
+            reasons.append(f"RSI oversold ({rsi_value:.1f})")
+        elif rsi_value < 50:
+            factors.append(0.2)  # Mildly bullish
+            reasons.append(f"RSI below neutral ({rsi_value:.1f})")
+
+        # Factor 2: MACD bullish crossover - 30% weight
+        if macd.get("bullish", False):
+            factors.append(0.3)
+            macd_hist = macd.get("histogram", 0)
+            reasons.append(f"MACD bullish crossover (hist={macd_hist:.4f})")
+
+        # Factor 3: Price near lower Bollinger Band (reversion opportunity) - 30% weight
+        bb_position = bb.get("position", "middle")
+        if bb_position in ["lower", "middle_lower"]:
+            factors.append(0.3)
+            reasons.append(f"Price near lower BB ({bb_position})")
+
+        # Calculate overall confidence (additive, capped at 1.0)
+        confidence = min(sum(factors), 1.0)
+
+        # Vote: Bullish if confidence > threshold
+        vote_threshold = 0.3
+        action = "buy" if confidence > vote_threshold else "hold"
 
         bull_vote = {
             "action": action,
             "confidence": confidence,
-            "reasoning": reasoning,
+            "reasoning": "; ".join(reasons) if reasons else "No bullish signals detected",
+            "factors": reasons,
+            "direction": "bullish" if action == "buy" else "neutral"
         }
 
-        self.log_decision(f"Bull vote: {action} (confidence={confidence:.2f})")
+        self.log_decision(f"Bull vote: {action} (confidence={confidence:.2f}, factors={len(factors)})")
 
         return {"bull_vote": bull_vote}
