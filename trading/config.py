@@ -2,11 +2,24 @@
 
 This module provides configuration dataclasses for the trading integration,
 following the pattern established by the Linear integration.
+
+SECURITY: All credentials loaded from environment variables only.
+See .env.example for configuration template.
 """
 
 import os
 from dataclasses import dataclass
 from typing import Optional
+
+# Load .env file if it exists (for local development)
+# In production, environment variables are set by the deployment platform
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed (production environment)
+
+from .validation import validate_exchange_name, ValidationError
 
 
 @dataclass
@@ -15,12 +28,16 @@ class TradingConfig:
 
     Follows the same pattern as LinearConfig for consistency with
     Auto Claude's integration architecture.
+
+    SECURITY: Never instantiate this class directly with credentials.
+    Always use TradingConfig.from_env() to load from environment variables.
+    Credentials are NEVER hardcoded or passed as parameters.
     """
 
     # Provider configuration
     provider: str  # "binance_futures", "binance_spot", "paper", "kraken", "alpaca"
-    api_key: str
-    api_secret: str
+    api_key: str  # Loaded from {PROVIDER}_API_KEY env var (use from_env())
+    api_secret: str  # Loaded from {PROVIDER}_API_SECRET env var (use from_env())
     testnet: bool = True  # Default to testnet for safety
     enabled: bool = True
 
@@ -71,6 +88,9 @@ class TradingConfig:
         Returns:
             TradingConfig instance with values from environment
 
+        Raises:
+            ValueError: If credentials are missing for non-paper providers
+
         Example:
             >>> config = TradingConfig.from_env("binance_futures")
             >>> config.is_valid()
@@ -79,12 +99,23 @@ class TradingConfig:
         if provider is None:
             provider = os.getenv("TRADING_PROVIDER", "binance_futures")
 
+        # Validate provider name at boundary (fail-fast)
+        provider = validate_exchange_name(provider)
+
         # Normalize provider name for env var lookup
         provider_upper = provider.upper().replace("-", "_")
 
-        # Load API credentials
+        # Load API credentials from environment (NEVER from code)
         api_key = os.getenv(f"{provider_upper}_API_KEY", "")
         api_secret = os.getenv(f"{provider_upper}_API_SECRET", "")
+
+        # Validate credentials are present (fail-fast for non-paper providers)
+        if provider != "paper" and (not api_key or not api_secret):
+            raise ValueError(
+                f"Missing credentials for {provider}. "
+                f"Set {provider_upper}_API_KEY and {provider_upper}_API_SECRET environment variables. "
+                f"See .env.example for template."
+            )
 
         # Load testnet setting (default: true for safety)
         testnet_str = os.getenv("TRADING_TESTNET", "true").lower()

@@ -17,6 +17,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from integrations.trading.config import TradingConfig
 from integrations.trading.manager import TradingManager
 from integrations.trading.providers.factory import create_provider
+from integrations.trading.validation import (
+    validate_symbol,
+    validate_limit,
+    ValidationError
+)
 
 
 def json_output(data: dict):
@@ -112,6 +117,9 @@ async def cmd_positions():
 async def cmd_run(args):
     """Execute a full trading loop."""
     try:
+        # Validate inputs at boundary (fail-fast)
+        symbol = validate_symbol(args.symbol)
+
         config = TradingConfig.from_env()
 
         # TODO: Initialize TradingManager and run trading loop
@@ -120,9 +128,11 @@ async def cmd_run(args):
             "success": True,
             "message": "Trading loop execution coming in Phase 1 completion",
             "dry_run": args.dry_run,
-            "symbol": args.symbol,
+            "symbol": symbol,
         })
 
+    except ValidationError as e:
+        json_output({"success": False, "error": f"Validation error: {e}"})
     except Exception as e:
         json_output({"success": False, "error": str(e)})
 
@@ -130,6 +140,9 @@ async def cmd_run(args):
 async def cmd_history(args):
     """Get trading history."""
     try:
+        # Validate inputs at boundary
+        limit = validate_limit(args.limit, max_limit=1000)
+
         # Load state file
         spec_dir = Path.cwd() / "specs"
         state_files = list(spec_dir.glob("*/.trading_state.json"))
@@ -160,11 +173,14 @@ async def cmd_history(args):
 async def cmd_cancel(args):
     """Cancel an order."""
     try:
+        # Validate inputs at boundary
+        symbol = validate_symbol(args.symbol)
+
         config = TradingConfig.from_env()
         provider = create_provider(config)
 
         try:
-            success = await provider.cancel_order(args.order_id, args.symbol)
+            success = await provider.cancel_order(args.order_id, symbol)
 
             json_output({
                 "success": True,
@@ -174,6 +190,8 @@ async def cmd_cancel(args):
         finally:
             await provider.close()
 
+    except ValidationError as e:
+        json_output({"success": False, "error": f"Validation error: {e}"})
     except Exception as e:
         json_output({"success": False, "error": str(e)})
 
@@ -181,25 +199,28 @@ async def cmd_cancel(args):
 async def cmd_close(args):
     """Close a position."""
     try:
+        # Validate inputs at boundary
+        symbol = validate_symbol(args.symbol)
+
         config = TradingConfig.from_env()
         provider = create_provider(config)
 
         try:
             # Get current position
             positions = await provider.fetch_positions()
-            position = next((p for p in positions if p.symbol == args.symbol), None)
+            position = next((p for p in positions if p.symbol == symbol), None)
 
             if not position:
                 json_output({
                     "success": False,
-                    "error": f"No open position for {args.symbol}",
+                    "error": f"No open position for {symbol}",
                 })
                 return
 
             # Create opposite order to close
             close_side = "sell" if position.side.value == "long" else "buy"
             order = await provider.create_order(
-                symbol=args.symbol,
+                symbol=symbol,
                 side=close_side,
                 order_type="market",
                 amount=position.size,
@@ -214,6 +235,8 @@ async def cmd_close(args):
         finally:
             await provider.close()
 
+    except ValidationError as e:
+        json_output({"success": False, "error": f"Validation error: {e}"})
     except Exception as e:
         json_output({"success": False, "error": str(e)})
 
