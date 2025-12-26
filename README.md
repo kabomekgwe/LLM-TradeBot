@@ -1,0 +1,292 @@
+# LLM-TradeBot 🤖📈
+
+Multi-platform algorithmic trading system powered by an 8-agent adversarial decision framework.
+
+## Features
+
+- **8-Agent Adversarial System**: Bull vs Bear agents with regime-aware decision making
+- **Multi-Platform Support**: Trade on 6 different platforms
+  - Binance Futures & Spot
+  - Kraken
+  - Coinbase Advanced Trade
+  - Alpaca (US Stocks)
+  - Paper Trading (No API keys needed)
+- **Intelligent Learning**: Trade journaling with pattern detection
+- **Risk Management**: Circuit breakers, position limits, veto power
+- **Market Regime Detection**: Adapts strategy to trending/choppy/volatile markets
+
+## Quick Start
+
+### 1. Installation
+
+```bash
+# Clone or navigate to the project
+cd LLM-TradeBot
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Configuration
+
+Copy the example configuration:
+
+```bash
+cp config/.env.example .env
+```
+
+Edit `.env` and configure your trading provider:
+
+```bash
+# Choose your provider
+TRADING_PROVIDER=paper  # Start with paper trading (safe!)
+
+# For real trading, add API keys:
+# BINANCE_FUTURES_API_KEY=your-key
+# BINANCE_FUTURES_API_SECRET=your-secret
+
+# Risk parameters
+TRADING_TESTNET=true
+TRADING_MAX_POSITION_SIZE_USD=1000.0
+TRADING_MAX_DAILY_DRAWDOWN_PCT=5.0
+TRADING_MAX_OPEN_POSITIONS=3
+```
+
+### 3. Run Trading System
+
+```bash
+# Check system status
+python -m trading.cli status
+
+# Get current positions
+python -m trading.cli positions
+
+# Execute trading loop (paper trading)
+python -m trading.cli run --symbol BTC/USDT
+
+# Generate insights from trade history
+python -m trading.cli insights
+```
+
+## Architecture
+
+### 8-Agent System
+
+1. **DataSync Agent**: Fetches multi-timeframe market data (5m, 15m, 1h)
+2. **QuantAnalyst Agent**: Calculates technical indicators and signals
+3. **Predict Agent**: LightGBM ML forecasting
+4. **Bull Agent**: Bullish analysis and reasoning
+5. **Bear Agent**: Bearish analysis and reasoning (adversarial)
+6. **DecisionCore Agent**: Weighted voting with regime awareness
+7. **RiskAudit Agent**: Safety checks with veto power
+8. **Execution Agent**: Order placement and management
+
+### Providers
+
+```python
+from trading.providers.factory import create_provider
+from trading.config import TradingConfig
+
+# Paper trading (no API keys)
+config = TradingConfig(provider="paper", testnet=True)
+provider = create_provider(config)
+
+# Real exchange
+config = TradingConfig.from_env()  # Loads from .env
+provider = create_provider(config)
+```
+
+### Memory & Learning
+
+```python
+from trading.memory import TradeJournal, PatternDetector
+
+# Load trade history
+journal = TradeJournal(spec_dir)
+
+# Analyze patterns
+detector = PatternDetector(journal)
+insights = detector.generate_all_insights()
+
+# Insights include:
+# - Regime performance analysis
+# - Agent prediction accuracy
+# - Confidence correlation
+# - Symbol-specific patterns
+```
+
+## Directory Structure
+
+```
+LLM-TradeBot/
+├── trading/                   # Main package
+│   ├── providers/             # Exchange integrations
+│   │   ├── binance_futures.py
+│   │   ├── binance_spot.py
+│   │   ├── kraken.py
+│   │   ├── coinbase.py
+│   │   ├── alpaca.py
+│   │   └── paper.py
+│   ├── agents/                # 8-agent system
+│   ├── models/                # Data models
+│   ├── memory/                # Trade journaling & learning
+│   ├── risk/                  # Risk management
+│   └── cli.py                 # Command-line interface
+├── config/                    # Configuration files
+│   └── .env.example
+├── examples/                  # Usage examples
+├── docs/                      # Documentation
+└── tests/                     # Test suite
+```
+
+## Usage Examples
+
+### Basic Trading
+
+```python
+import asyncio
+from trading.config import TradingConfig
+from trading.manager import TradingManager
+
+async def main():
+    # Load configuration
+    config = TradingConfig.from_env()
+
+    # Initialize manager
+    manager = TradingManager(config)
+
+    # Run trading loop
+    result = await manager.run_trading_loop(symbol="BTC/USDT")
+
+    if result["success"]:
+        print(f"Decision: {result['decision']['action']}")
+        print(f"Confidence: {result['decision']['confidence']}")
+
+asyncio.run(main())
+```
+
+### Pattern Analysis
+
+```python
+from pathlib import Path
+from trading.memory import TradeJournal, PatternDetector
+
+# Load journal
+journal = TradeJournal(Path("data/trading"))
+
+# Calculate metrics
+metrics = journal.calculate_metrics()
+print(f"Win Rate: {metrics['win_rate']:.1f}%")
+print(f"Profit Factor: {metrics['profit_factor']:.2f}")
+
+# Detect patterns
+detector = PatternDetector(journal)
+insights = detector.generate_all_insights()
+
+for insight in insights:
+    print(f"\n{insight.title}")
+    print(insight.description)
+```
+
+## Safety Features
+
+- **Testnet Default**: Always starts in testnet mode
+- **Circuit Breakers**: Auto-halt on excessive losses
+- **Position Limits**: Max size and count restrictions
+- **Risk Veto**: Risk agent can block dangerous trades
+- **Paper Trading**: Test strategies without real money
+
+## CLI Commands
+
+```bash
+# System status
+python -m trading.cli status
+
+# View positions
+python -m trading.cli positions
+
+# Execute trade
+python -m trading.cli run --symbol BTC/USDT [--dry-run]
+
+# Trade history
+python -m trading.cli history --limit 50
+
+# Close position
+python -m trading.cli close --symbol BTC/USDT
+
+# Cancel order
+python -m trading.cli cancel --order-id ORDER_ID --symbol BTC/USDT
+
+# Generate insights
+python -m trading.cli insights
+```
+
+## Configuration Options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRADING_PROVIDER` | - | Exchange provider (binance_futures, paper, etc.) |
+| `TRADING_TESTNET` | `true` | Use testnet/sandbox mode |
+| `TRADING_MAX_POSITION_SIZE_USD` | `1000.0` | Max position size |
+| `TRADING_MAX_DAILY_DRAWDOWN_PCT` | `5.0` | Daily loss limit (%) |
+| `TRADING_MAX_OPEN_POSITIONS` | `3` | Max concurrent positions |
+| `TRADING_DECISION_THRESHOLD` | `0.6` | Min confidence (0.0-1.0) |
+
+## Supported Exchanges
+
+| Exchange | Type | Testnet | API Keys Required |
+|----------|------|---------|-------------------|
+| Binance Futures | Crypto | ✅ | ✅ |
+| Binance Spot | Crypto | ✅ | ✅ |
+| Kraken | Crypto | ❌ | ✅ |
+| Coinbase | Crypto | ✅ | ✅ |
+| Alpaca | Stocks | ✅ | ✅ |
+| Paper Trading | Simulator | ✅ | ❌ |
+
+## Dependencies
+
+- Python 3.9+
+- ccxt >= 4.0.0 (exchange API)
+- ta-lib >= 0.4.0 (technical indicators)
+- lightgbm >= 4.0.0 (ML predictions)
+- pandas, numpy
+- alpaca-py (for stock trading)
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test
+pytest tests/test_providers.py -v
+
+# Test with coverage
+pytest tests/ --cov=trading --cov-report=html
+```
+
+## License
+
+MIT License - see LICENSE file
+
+## Contributing
+
+Contributions welcome! Please read CONTRIBUTING.md first.
+
+## Disclaimer
+
+**This software is for educational purposes only. Trading cryptocurrencies and stocks involves substantial risk of loss. Past performance does not guarantee future results. Use at your own risk.**
+
+## Support
+
+- Documentation: `docs/`
+- Issues: GitHub Issues
+- Examples: `examples/`
+
+---
+
+Built with ❤️ using Claude AI
