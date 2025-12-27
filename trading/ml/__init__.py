@@ -64,14 +64,16 @@ Model Persistence:
 """
 
 from .feature_engineering import FeatureEngineer
-from .ensemble import EnsemblePredictor, ModelType
+# NOTE: Old ensemble.py file deprecated in Phase 6
+# New ensemble framework in trading.ml.ensemble/ directory
+# from .ensemble import EnsemblePredictor, ModelType
 from .training import ModelTrainer
 
 __all__ = [
     "FeatureEngineer",
-    "EnsemblePredictor",
+    # "EnsemblePredictor",  # Deprecated - use trading.ml.ensemble instead
     "ModelTrainer",
-    "ModelType",
+    # "ModelType",  # Deprecated
 ]
 
 __version__ = "1.0.0"

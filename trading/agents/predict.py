@@ -1,11 +1,11 @@
 """PredictAgent - ML-based price forecasting.
 
 This is Agent #3 in the 8-agent system.
-Uses LightGBM ML models to forecast price direction.
+Uses ensemble ML models (LightGBM + XGBoost + Random Forest) with regime-aware
+strategy switching to forecast price direction.
 """
 
-from typing import Any
-import lightgbm as lgb
+from typing import Any, Dict
 import numpy as np
 import os
 
@@ -13,19 +13,22 @@ from .base_agent import BaseAgent
 from ..exceptions import (
     ModelPredictionError,
     InvalidIndicatorDataError,
-    TradingBotError,
+    ModelError,
 )
+from ..ml.ensemble.regime_aware_ensemble import RegimeAwareEnsemble
+from ..ml.ensemble.persistence import EnsemblePersistence
+from ..ml.feature_engineering import FeatureEngineer
 
 
 class PredictAgent(BaseAgent):
     """Prediction agent - ML price forecasting.
 
-    Uses machine learning (LightGBM) to predict 30-minute price direction
-    based on historical features from QuantAnalystAgent.
+    Uses ensemble ML models (LightGBM + XGBoost + Random Forest) with
+    regime-aware strategy switching to predict price direction.
     """
 
     def __init__(self, provider, config):
-        """Initialize PredictAgent with pre-trained LightGBM model.
+        """Initialize PredictAgent with pre-trained ensemble model.
 
         Args:
             provider: Exchange provider instance
@@ -33,26 +36,62 @@ class PredictAgent(BaseAgent):
         """
         super().__init__(provider, config)
 
-        # Load pre-trained LightGBM model
-        model_path = 'trading/ml/models/lgbm_predictor.txt'
-        if os.path.exists(model_path):
-            self.model = lgb.Booster(model_file=model_path)
-            self.logger.info(f"Loaded LightGBM model from {model_path}")
+        # Initialize ensemble and persistence
+        self.ensemble = None
+        self.metadata = None
+        self.feature_engineer = FeatureEngineer(include_target=False)
+
+        # Try to load ensemble models
+        persistence = EnsemblePersistence(model_dir='trading/ml/models/ensemble')
+
+        if persistence.model_exists():
+            try:
+                models, metadata = persistence.load_models()
+
+                # Create ensemble and register loaded models
+                self.ensemble = RegimeAwareEnsemble()
+
+                # Replace default models with loaded models
+                self.ensemble.model_registry._models = models
+
+                # Mark ensemble as fitted
+                self.ensemble.is_fitted = True
+                self.ensemble.n_features_in_ = metadata.get('n_features', 86)
+
+                self.metadata = metadata
+                self.logger.info(
+                    "Loaded ensemble models",
+                    extra={
+                        'n_models': len(models),
+                        'models': list(models.keys()),
+                        'n_features': self.ensemble.n_features_in_,
+                        'trained_date': metadata.get('trained_date', 'unknown')
+                    }
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to load ensemble models: {e}",
+                    extra={'error': str(e)},
+                    exc_info=True
+                )
+                self.ensemble = None
         else:
-            self.model = None
-            self.logger.warning(f"No trained model found at {model_path}. Run train_lightgbm.py first.")
+            self.logger.warning("No trained ensemble models found. Run train_ensemble.py first.")
 
     async def execute(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Generate ML price prediction using LightGBM model.
+        """Generate ML price prediction using ensemble models.
 
         Args:
-            context: Must contain "quant_analyst" with indicators from QuantAnalystAgent
+            context: Must contain "quant_analyst" with indicators and regime_info
 
         Returns:
             Context updated with "ml_prediction" containing:
                 - "direction": "up", "down", or "neutral"
                 - "confidence": Float 0-1
                 - "probability_up": Raw probability for transparency
+                - "strategy": Ensemble strategy used ("voting", "stacking", "dynamic")
+                - "individual_predictions": Predictions from each model
+                - "regime_info": Regime detection details (if available)
 
         Example:
             >>> result = await agent.execute(context)
@@ -60,6 +99,8 @@ class PredictAgent(BaseAgent):
             'up'
             >>> result["ml_prediction"]["confidence"]
             0.73
+            >>> result["ml_prediction"]["strategy"]
+            'stacking'
         """
         # Check if ML predictions are enabled
         if not self.config.enable_ml_predictions:
@@ -72,14 +113,14 @@ class PredictAgent(BaseAgent):
                 }
             }
 
-        # Fallback if no model trained
-        if not self.model:
-            self.log_decision("No trained model available, returning neutral")
+        # Fallback if no ensemble trained
+        if not self.ensemble:
+            self.log_decision("No trained ensemble available, returning neutral")
             return {
                 "ml_prediction": {
                     "direction": "neutral",
                     "confidence": 0.0,
-                    "reason": "No trained model available - run train_lightgbm.py",
+                    "reason": "No trained ensemble available - run train_ensemble.py",
                 }
             }
 
@@ -97,63 +138,112 @@ class PredictAgent(BaseAgent):
                 }
             }
 
-        # Extract features (must match training feature order)
+        # Extract feature names from metadata
+        feature_names = self.metadata.get('feature_names', [])
+
+        if not feature_names:
+            self.log_decision("No feature names in metadata, cannot extract features")
+            return {
+                "ml_prediction": {
+                    "direction": "neutral",
+                    "confidence": 0.0,
+                    "reason": "No feature names in metadata",
+                }
+            }
+
+        # Extract features from indicators
+        # Note: This is a simplified version - in production, the features would come
+        # from QuantAnalystAgent's full feature engineering pipeline
         try:
-            features = np.array([[
-                indicators['rsi']['value'],
-                indicators['macd']['macd'],
-                indicators['macd']['signal'],
-                indicators['macd']['histogram'],
-                indicators['bollinger']['upper'],
-                indicators['bollinger']['middle'],
-                indicators['bollinger']['lower'],
-                0.0  # Price returns placeholder (calculate if needed)
-            ]])
-        except KeyError as e:
-            # Missing indicator field - data structure issue
+            # For now, create a feature array matching expected size
+            # In production, QuantAnalyst would provide all 86 features
+            features = np.zeros((1, len(feature_names)))
+
+            # Map available indicators to features (simplified)
+            # This assumes QuantAnalyst has already engineered all features
+            if 'engineered_features' in indicators:
+                # Use pre-engineered features from QuantAnalyst
+                features = np.array([indicators['engineered_features']])
+            else:
+                # Fallback: return neutral if features not available
+                self.log_decision("Engineered features not available in indicators")
+                return {
+                    "ml_prediction": {
+                        "direction": "neutral",
+                        "confidence": 0.0,
+                        "reason": "Engineered features not available - QuantAnalyst needs update",
+                    }
+                }
+
+        except (KeyError, TypeError, ValueError) as e:
             self.log_decision(
                 "feature_extraction_failed",
                 level="error",
-                missing_field=str(e),
-            )
-            raise InvalidIndicatorDataError(f"Missing required indicator field: {e}")
-        except (TypeError, ValueError) as e:
-            # Invalid data type - data quality issue
-            self.log_decision(
-                "invalid_indicator_data",
-                level="error",
                 error=str(e),
             )
-            raise InvalidIndicatorDataError(f"Invalid indicator data type: {e}")
+            raise InvalidIndicatorDataError(f"Failed to extract features: {e}")
 
-        # Predict probability of price going up
+        # Get regime info (if available)
+        regime_info = quant_analyst.get('regime_info', None)
+
+        # Predict using ensemble
         try:
-            prob_up = self.model.predict(features, num_iteration=self.model.best_iteration)[0]
-        except Exception as e:
-            # Model prediction failure - ML error
+            if regime_info:
+                # Regime-aware prediction
+                prediction, metadata = self.ensemble.predict_with_regime(features, regime_info)
+
+                prob_up = metadata['ensemble_probability']
+                strategy = metadata['strategy']
+                individual_predictions = metadata['individual_predictions']
+                individual_probabilities = metadata['individual_probabilities']
+                regime_details = {
+                    'current_regime': metadata['regime'],
+                    'is_low_volatility': metadata['is_low_volatility'],
+                    'regime_confidence': metadata['regime_confidence'],
+                    'reason': metadata['reason']
+                }
+            else:
+                # Default voting prediction (no regime info)
+                prediction = self.ensemble.predict(features)
+                prob_up = self.ensemble.predict_proba(features)[0, 1]
+                strategy = 'voting'
+                individual_predictions = {}
+                individual_probabilities = {}
+                regime_details = None
+
+                self.log_decision("No regime info available, using default voting strategy")
+
+        except ModelError as e:
             self.log_decision(
-                "model_prediction_failed",
+                "ensemble_prediction_failed",
                 level="critical",
                 error=str(e),
-                error_type=type(e).__name__,
                 exc_info=True,
             )
-            raise ModelPredictionError(f"ML model prediction failed: {e}")
+            raise ModelPredictionError(f"Ensemble prediction failed: {e}")
 
         # Convert to direction and confidence
-        # prob_up in [0, 1], where >0.5 means price will go up
         direction = "up" if prob_up > 0.5 else "down"
-        confidence = abs(prob_up - 0.5) * 2  # Scale to [0, 1]: confidence in prediction
+        confidence = abs(prob_up - 0.5) * 2  # Scale to [0, 1]
 
         ml_prediction = {
             "direction": direction,
             "confidence": confidence,
             "probability_up": prob_up,
-            "reason": f"ML prediction: {prob_up:.2%} up, conf={confidence:.2f}",
+            "strategy": strategy,
+            "individual_predictions": individual_predictions,
+            "individual_probabilities": individual_probabilities,
+            "regime_info": regime_details,
+            "reason": f"Ensemble {strategy}: {prob_up:.2%} up, conf={confidence:.2f}",
         }
 
         self.log_decision(
-            f"ML prediction: {direction} (prob_up={prob_up:.2%}, confidence={confidence:.2f})"
+            f"Ensemble prediction: {direction} (strategy={strategy}, prob_up={prob_up:.2%}, confidence={confidence:.2f})",
+            extra={
+                'strategy': strategy,
+                'individual_predictions': individual_predictions,
+                'regime_info': regime_details
+            }
         )
 
         return {"ml_prediction": ml_prediction}

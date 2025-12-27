@@ -17,7 +17,8 @@ from datetime import datetime
 import json
 
 from .feature_engineering import FeatureEngineer
-from .ensemble import EnsemblePredictor, ModelType
+# NOTE: Old ensemble.py file deprecated in Phase 6
+# from .ensemble import EnsemblePredictor, ModelType
 
 
 class ModelTrainer:

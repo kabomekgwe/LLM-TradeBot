@@ -123,6 +123,52 @@ class InsufficientMarketDataError(AgentError):
 
 
 # ============================================================================
+# ML Model Errors
+# ============================================================================
+
+class ModelError(TradingBotError):
+    """Machine learning model errors."""
+
+    def __init__(self, message: str, model_name: str = None, context: dict = None):
+        """
+        Initialize model error with context.
+
+        Args:
+            message: Error message
+            model_name: Name of the model that failed
+            context: Additional context dictionary
+        """
+        self.model_name = model_name
+        self.context = context or {}
+
+        full_message = message
+        if model_name:
+            full_message = f"[{model_name}] {message}"
+
+        super().__init__(full_message)
+
+
+class ModelNotFittedError(ModelError):
+    """Model must be fitted before making predictions."""
+    pass
+
+
+class FeatureMismatchError(ModelError):
+    """Feature count or order mismatch between training and prediction."""
+    pass
+
+
+class ModelLoadError(ModelError):
+    """Failed to load model from disk."""
+    pass
+
+
+class ModelSaveError(ModelError):
+    """Failed to save model to disk."""
+    pass
+
+
+# ============================================================================
 # State Persistence Errors
 # ============================================================================
 
