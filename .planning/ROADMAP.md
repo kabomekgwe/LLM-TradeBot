@@ -31,10 +31,10 @@
 - Position limit enforcement architecture (per-symbol, per-strategy, portfolio-wide)
 - Emergency shutdown flows (graceful vs immediate, position liquidation)
 
-**Plans**: TBD
+**Plans**: 1 plan created
 
 Plans:
-- [ ] 09-01: TBD (run /gsd:plan-phase 9 to break down)
+- [ ] 09-01: Emergency Safety Controls (kill switch API, circuit breaker, position limits)
 
 #### Phase 10: Real-Time Monitoring Infrastructure
 
