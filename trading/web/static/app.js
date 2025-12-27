@@ -189,23 +189,71 @@ class Dashboard {
     updateMetrics(metrics) {
         // Total P&L
         const pnl = metrics.total_pnl || 0;
-        document.getElementById('total-pnl').textContent = this.formatCurrency(pnl);
-        document.getElementById('total-pnl').className = `card-value ${pnl >= 0 ? 'positive' : 'negative'}`;
+        const pnlElement = document.getElementById('total-pnl');
+        if (pnlElement) {
+            pnlElement.textContent = this.formatCurrency(pnl);
+            pnlElement.className = `card-value ${pnl >= 0 ? 'positive' : 'negative'}`;
+        }
+
+        // Daily P&L (Phase 10 - new field)
+        const dailyPnl = metrics.daily_pnl || 0;
+        const dailyPnlElement = document.getElementById('daily-pnl');
+        if (dailyPnlElement) {
+            dailyPnlElement.textContent = this.formatCurrency(dailyPnl);
+            dailyPnlElement.className = `card-value ${dailyPnl >= 0 ? 'positive' : 'negative'}`;
+        }
 
         // Win Rate
         const winRate = metrics.win_rate || 0;
-        document.getElementById('win-rate').textContent = `${winRate.toFixed(1)}%`;
-        document.getElementById('total-trades').textContent = `${metrics.total_trades || 0} trades`;
+        const winRateElement = document.getElementById('win-rate');
+        if (winRateElement) {
+            winRateElement.textContent = `${winRate.toFixed(1)}%`;
+        }
+
+        const totalTradesElement = document.getElementById('total-trades');
+        if (totalTradesElement) {
+            totalTradesElement.textContent = `${metrics.total_trades || 0} trades`;
+        }
 
         // Sharpe Ratio
         const sharpe = metrics.sharpe_ratio || 0;
-        document.getElementById('sharpe-ratio').textContent = sharpe.toFixed(2);
-        document.getElementById('sharpe-ratio').className = `card-value ${sharpe >= 1 ? 'positive' : 'neutral'}`;
+        const sharpeElement = document.getElementById('sharpe-ratio');
+        if (sharpeElement) {
+            sharpeElement.textContent = sharpe.toFixed(2);
+            sharpeElement.className = `card-value ${sharpe >= 1 ? 'positive' : sharpe >= 0.5 ? 'neutral' : 'negative'}`;
+        }
 
-        // Max Drawdown
-        const drawdown = metrics.max_drawdown || 0;
-        document.getElementById('max-drawdown').textContent = `${Math.abs(drawdown).toFixed(2)}%`;
-        document.getElementById('max-drawdown').className = `card-value ${drawdown > -10 ? 'neutral' : 'negative'}`;
+        // Current Drawdown (Phase 10 - use current_drawdown instead of max_drawdown for real-time)
+        const currentDrawdown = metrics.current_drawdown || 0;
+        const drawdownElement = document.getElementById('current-drawdown');
+        if (drawdownElement) {
+            drawdownElement.textContent = `${currentDrawdown.toFixed(2)}%`;
+            drawdownElement.className = `card-value ${currentDrawdown < 5 ? 'neutral' : currentDrawdown < 10 ? 'warning' : 'negative'}`;
+        }
+
+        // Max Drawdown (historical)
+        const maxDrawdown = metrics.max_drawdown || 0;
+        const maxDrawdownElement = document.getElementById('max-drawdown');
+        if (maxDrawdownElement) {
+            maxDrawdownElement.textContent = `${maxDrawdown.toFixed(2)}%`;
+            maxDrawdownElement.className = `card-value ${maxDrawdown < 10 ? 'neutral' : 'negative'}`;
+        }
+
+        // Consecutive Losses (Phase 10 - new field)
+        const consecutiveLosses = metrics.consecutive_losses || 0;
+        const consecutiveLossesElement = document.getElementById('consecutive-losses');
+        if (consecutiveLossesElement) {
+            consecutiveLossesElement.textContent = consecutiveLosses.toString();
+            consecutiveLossesElement.className = `card-value ${consecutiveLosses < 3 ? 'neutral' : consecutiveLosses < 5 ? 'warning' : 'negative'}`;
+        }
+
+        // Current Equity (Phase 10 - new field)
+        const currentEquity = metrics.current_equity || 10000;
+        const currentEquityElement = document.getElementById('current-equity');
+        if (currentEquityElement) {
+            currentEquityElement.textContent = this.formatCurrency(currentEquity);
+            currentEquityElement.className = `card-value ${currentEquity >= 10000 ? 'positive' : 'negative'}`;
+        }
     }
 
     /**

@@ -8,6 +8,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from .config import TradingConfig
 from .state import TradingState
@@ -30,6 +31,14 @@ from .safety.circuit_breaker import CircuitBreaker
 from .safety.position_limits import PositionLimitEnforcer
 from .analytics.risk_calculator import RiskCalculator
 from .memory.trade_history import TradeJournal
+
+# Import monitoring infrastructure (Phase 10)
+from .monitoring.metrics_tracker import MetricsTracker
+from .monitoring.system_health import SystemHealthMonitor
+from .monitoring.alert_manager import AlertManager
+
+# Import notifications
+from .notifications.manager import NotificationManager
 
 # Import all 8 agents
 from .agents.data_sync import DataSyncAgent
@@ -133,6 +142,22 @@ class TradingManager:
         self.circuit_breaker = CircuitBreaker(self.thresholds, self.risk_calculator)
         self.position_limits = PositionLimitEnforcer(self.thresholds)
 
+        # Initialize notification manager
+        self.notification_manager = NotificationManager(self.config)
+
+        # Initialize monitoring infrastructure (Phase 10)
+        self.metrics_tracker = MetricsTracker(initial_equity=10000.0)
+        self.health_monitor = SystemHealthMonitor(
+            kill_switch=self.kill_switch,
+            circuit_breaker=self.circuit_breaker,
+            position_limits=self.position_limits,
+            provider=self.provider,
+        )
+        self.alert_manager = AlertManager(
+            notification_manager=self.notification_manager,
+            config=self.config,
+        )
+
         # Initialize all 8 agents
         self.agents = {
             "data_sync": DataSyncAgent(self.provider, self.config),
@@ -202,6 +227,13 @@ class TradingManager:
                     "kill_switch_status": self.kill_switch.get_status(),
                 }
             )
+
+            # MONITORING: Check alerts for kill switch activation (Phase 10 Task 3)
+            await self.alert_manager.check_and_send_alerts(
+                metrics=self.metrics_tracker.get_current_metrics().to_dict(),
+                health=self.health_monitor.get_health_status().to_dict(),
+            )
+
             raise RuntimeError(
                 "KILL SWITCH ACTIVE - ALL TRADING STOPPED. "
                 f"Reason: {self.kill_switch.get_status()['reason']}"
@@ -215,6 +247,13 @@ class TradingManager:
                     "circuit_breaker_status": self.circuit_breaker.get_status(),
                 }
             )
+
+            # MONITORING: Check alerts for circuit breaker trip (Phase 10 Task 3)
+            await self.alert_manager.check_and_send_alerts(
+                metrics=self.metrics_tracker.get_current_metrics().to_dict(),
+                health=self.health_monitor.get_health_status().to_dict(),
+            )
+
             raise RuntimeError(
                 f"Circuit breaker open - trading paused. "
                 f"Reason: {self.circuit_breaker.get_status()['trip_reason']}"
@@ -359,6 +398,40 @@ class TradingManager:
                         }
                     )
                     # Circuit breaker has tripped - trading will be blocked next iteration
+
+                # MONITORING: Update real-time metrics (Phase 10 Task 1)
+                # Create trade data dict for metrics tracker
+                trade_data = {
+                    "realized_pnl": execution.get("pnl", 0.0),
+                    "pnl_pct": execution.get("pnl_pct", 0.0),
+                    "won": execution.get("pnl", 0.0) > 0,
+                    "closed": True,
+                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "symbol": symbol,
+                    "side": decision.get("action"),
+                    "entry_price": execution.get("price", 0.0),
+                    "amount": execution.get("amount", 0.0),
+                }
+
+                # Update metrics tracker
+                updated_metrics = self.metrics_tracker.update_trade(trade_data)
+
+                # TODO: Broadcast metrics update via dashboard server (if available)
+                # This will be connected when dashboard server integration is added
+                self.logger.debug(
+                    "metrics_updated",
+                    extra={
+                        "sharpe": updated_metrics.sharpe_ratio,
+                        "drawdown": updated_metrics.current_drawdown,
+                        "win_rate": updated_metrics.win_rate,
+                    }
+                )
+
+                # MONITORING: Check alert triggers after trade execution (Phase 10 Task 3)
+                await self.alert_manager.check_and_send_alerts(
+                    metrics=updated_metrics.to_dict(),
+                    health=self.health_monitor.get_health_status().to_dict(),
+                )
 
                 # Clear decision context
                 DecisionContext.clear()

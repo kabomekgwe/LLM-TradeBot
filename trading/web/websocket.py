@@ -28,6 +28,10 @@ class MessageType(str, Enum):
     METRICS_UPDATE = "metrics_update"
     EQUITY_UPDATE = "equity_update"
 
+    # Health updates (Phase 10 Task 2)
+    HEALTH_UPDATE = "health_update"
+    SAFETY_UPDATE = "safety_update"
+
     # Agent events
     AGENT_DECISION = "agent_decision"
     AGENT_ANALYSIS = "agent_analysis"

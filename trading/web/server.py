@@ -22,6 +22,9 @@ from ..config import TradingConfig
 from ..memory.trade_history import TradeJournal
 from .websocket import WebSocketManager, MessageType
 from ..safety.kill_switch import KillSwitch
+from ..monitoring.metrics_tracker import MetricsTracker
+from ..monitoring.system_health import SystemHealthMonitor
+from ..monitoring.alert_manager import AlertManager
 
 
 class DashboardServer:
@@ -44,6 +47,9 @@ class DashboardServer:
         config: TradingConfig,
         trade_journal: Optional[TradeJournal] = None,
         kill_switch: Optional[KillSwitch] = None,
+        metrics_tracker: Optional[MetricsTracker] = None,
+        health_monitor: Optional[SystemHealthMonitor] = None,
+        alert_manager: Optional[AlertManager] = None,
         host: str = "0.0.0.0",
         port: int = 5173,
     ):
@@ -53,12 +59,18 @@ class DashboardServer:
             config: Trading configuration
             trade_journal: Optional trade journal for historical data
             kill_switch: Optional kill switch instance for safety endpoints
+            metrics_tracker: Optional real-time metrics tracker
+            health_monitor: Optional system health monitor
+            alert_manager: Optional alert manager for testing alerts
             host: Server host (default: 0.0.0.0)
             port: Server port (default: 5173)
         """
         self.config = config
         self.trade_journal = trade_journal
         self.kill_switch = kill_switch
+        self.metrics_tracker = metrics_tracker
+        self.health_monitor = health_monitor
+        self.alert_manager = alert_manager
         self.host = host
         self.port = port
         self.logger = logging.getLogger(__name__)
@@ -154,6 +166,70 @@ class DashboardServer:
                 "avg_win": self.trade_journal.calculate_average_win(),
                 "avg_loss": self.trade_journal.calculate_average_loss(),
             })
+
+        # Get real-time metrics (NEW - Phase 10 Task 1)
+        @self.app.get("/api/v1/metrics/realtime")
+        async def get_realtime_metrics():
+            """Get real-time performance metrics snapshot.
+
+            Returns current metrics from MetricsTracker including:
+            - Sharpe ratio, Sortino ratio
+            - Current drawdown, max drawdown
+            - Win rate, consecutive losses
+            - Total/daily/weekly P&L
+            - Current equity, peak equity
+            """
+            if not self.metrics_tracker:
+                return JSONResponse({
+                    "error": "Metrics tracker not initialized",
+                    "metrics": {}
+                })
+
+            metrics = self.metrics_tracker.get_current_metrics()
+            return JSONResponse(metrics.to_dict())
+
+        # Get system health status (NEW - Phase 10 Task 2)
+        @self.app.get("/api/v1/health/status")
+        async def get_health_status():
+            """Get current system health status.
+
+            Returns aggregated health status including:
+            - Overall health level (HEALTHY, DEGRADED, CRITICAL)
+            - Kill switch status
+            - Circuit breaker status
+            - Position utilization
+            - API connection status
+            """
+            if not self.health_monitor:
+                return JSONResponse({
+                    "error": "Health monitor not initialized",
+                    "health": {
+                        "level": "unknown",
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                })
+
+            health = self.health_monitor.get_health_status()
+            return JSONResponse(health.to_dict())
+
+        # Get safety controls detailed status (NEW - Phase 10 Task 2)
+        @self.app.get("/api/v1/health/safety")
+        async def get_safety_status():
+            """Get detailed safety controls status.
+
+            Returns detailed status of:
+            - Kill switch (active, reason, triggered_by, timestamp)
+            - Circuit breaker (open, reason, trip_time, thresholds)
+            - Position limits (current, max, utilization)
+            """
+            if not self.health_monitor:
+                return JSONResponse({
+                    "error": "Health monitor not initialized",
+                    "safety": {}
+                })
+
+            safety_status = self.health_monitor.get_safety_status()
+            return JSONResponse(safety_status)
 
         # Get equity curve data
         @self.app.get("/api/equity-curve")
@@ -288,6 +364,54 @@ class DashboardServer:
                 "status": self.kill_switch.get_status()
             })
 
+        # Alert testing endpoint (Phase 10 Task 3)
+        @self.app.post("/api/v1/alerts/test")
+        async def test_alert(
+            request: Request,
+            x_hmac_signature: Optional[str] = Header(None, alias="X-HMAC-Signature")
+        ):
+            """Send test alert to verify channel configuration.
+
+            Requires HMAC-SHA256 signature in X-HMAC-Signature header.
+
+            Body:
+                {
+                    "channel": "slack" | "email" | "telegram" | "all",
+                    "test_message": "Optional custom test message"
+                }
+
+            Returns success/failure status for each channel.
+            """
+            if not self.alert_manager:
+                raise HTTPException(status_code=503, detail="Alert manager not initialized")
+
+            # Verify HMAC signature
+            body = await request.body()
+            body_str = body.decode()
+
+            if not x_hmac_signature:
+                raise HTTPException(status_code=401, detail="Missing X-HMAC-Signature header")
+
+            # Use kill switch HMAC verification (same security requirement)
+            if not self.kill_switch:
+                raise HTTPException(status_code=503, detail="Kill switch not initialized")
+
+            if not self.kill_switch.verify_hmac(body_str, x_hmac_signature):
+                self.logger.warning("test_alert_invalid_signature")
+                raise HTTPException(status_code=401, detail="Invalid HMAC signature")
+
+            # Parse body
+            try:
+                data = json.loads(body_str) if body_str else {}
+                channel = data.get("channel", "all")
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+            # Send test alert
+            result = await self.alert_manager.send_test_alert(channel=channel if channel != "all" else None)
+
+            return JSONResponse(result)
+
         # Static files - serve frontend
         static_dir = Path(__file__).parent / "static"
         if static_dir.exists():
@@ -418,6 +542,22 @@ class DashboardServer:
             alert: Alert data to broadcast
         """
         await self.ws_manager.broadcast(MessageType.ALERT, alert)
+
+    async def broadcast_health_update(self, health: Dict[str, Any]):
+        """Broadcast system health update to all connected clients.
+
+        Args:
+            health: Health status data to broadcast
+        """
+        await self.ws_manager.broadcast(MessageType.HEALTH_UPDATE, health)
+
+    async def broadcast_safety_update(self, safety: Dict[str, Any]):
+        """Broadcast safety controls update to all connected clients.
+
+        Args:
+            safety: Safety status data to broadcast
+        """
+        await self.ws_manager.broadcast(MessageType.SAFETY_UPDATE, safety)
 
     def is_running(self) -> bool:
         """Check if server is running."""
