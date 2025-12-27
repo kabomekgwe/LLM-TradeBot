@@ -1,20 +1,27 @@
 """Feature Engineering - Generate ML features from OHLCV data.
 
-Implements 50+ features across multiple categories:
+Implements 65+ features across multiple categories:
 - Returns (simple, log, forward)
-- Technical indicators (MA, RSI, MACD, Bollinger Bands)
+- Technical indicators (MA, RSI, MACD, Bollinger Bands) - pandas-ta
 - Volatility metrics (ATR, standard deviation, Keltner channels)
 - Momentum indicators (ROC, momentum, Williams %R)
 - Volume metrics (OBV, volume ratios, VWAP)
 - Price patterns (highs/lows, price position)
 - Statistical features (skewness, kurtosis, autocorrelation)
+- Sentiment (Fear & Greed Index from Alternative.me)
+- Temporal (sessions, day-of-week, holidays via pandas_market_calendars)
+- Regime (HMM-based volatility regime detection)
 """
 
 import logging
 import numpy as np
 import pandas as pd
+import pandas_ta as ta
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from trading.features.sentiment import SentimentFeatures
+from trading.features.temporal import TemporalFeatures
+from trading.features.regime import VolatilityRegimeDetector
 
 
 @dataclass
@@ -57,6 +64,11 @@ class FeatureEngineer:
         self.include_target = include_target
         self.target_horizon = target_horizon
 
+        # Initialize feature extractors
+        self.sentiment = SentimentFeatures()
+        self.temporal = TemporalFeatures(calendar_name='NYSE')
+        self.regime_detector = VolatilityRegimeDetector(n_regimes=2, min_periods=100)
+
         # Feature categories
         self.feature_categories = {
             'returns': [],
@@ -66,6 +78,10 @@ class FeatureEngineer:
             'volume': [],
             'price_patterns': [],
             'statistical': [],
+            'microstructure': [],
+            'sentiment': [],
+            'temporal': [],
+            'regime': [],
         }
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -94,6 +110,9 @@ class FeatureEngineer:
         data = self._add_volume_features(data)
         data = self._add_price_patterns(data)
         data = self._add_statistical_features(data)
+        data = self._add_sentiment_features(data)
+        data = self._add_temporal_features(data)
+        data = self._add_regime_features(data)
 
         # Add target if requested
         if self.include_target:
@@ -147,36 +166,30 @@ class FeatureEngineer:
             df[col_name] = df['close'].ewm(span=window, adjust=False).mean()
             self.feature_categories['technical'].append(col_name)
 
-        # MACD
-        ema_12 = df['close'].ewm(span=12, adjust=False).mean()
-        ema_26 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = ema_12 - ema_26
-        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        df['macd_histogram'] = df['macd'] - df['macd_signal']
+        # MACD (using pandas-ta)
+        macd_result = ta.macd(df['close'], fast=12, slow=26, signal=9)
+        df['macd'] = macd_result['MACD_12_26_9']
+        df['macd_signal'] = macd_result['MACDs_12_26_9']
+        df['macd_histogram'] = macd_result['MACDh_12_26_9']
         self.feature_categories['technical'].extend(['macd', 'macd_signal', 'macd_histogram'])
 
-        # RSI
+        # RSI (using pandas-ta)
         for window in [14]:
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-            rs = gain / loss
             col_name = f'rsi_{window}'
-            df[col_name] = 100 - (100 / (1 + rs))
+            df[col_name] = ta.rsi(df['close'], length=window)
             self.feature_categories['technical'].append(col_name)
 
-        # Bollinger Bands
+        # Bollinger Bands (using pandas-ta)
         for window in [20]:
-            sma = df['close'].rolling(window).mean()
-            std = df['close'].rolling(window).std()
-            df[f'bb_upper_{window}'] = sma + (2 * std)
-            df[f'bb_lower_{window}'] = sma - (2 * std)
-            df[f'bb_width_{window}'] = (df[f'bb_upper_{window}'] - df[f'bb_lower_{window}']) / sma
-            df[f'bb_position_{window}'] = (df['close'] - df[f'bb_lower_{window}']) / (
-                df[f'bb_upper_{window}'] - df[f'bb_lower_{window}']
-            )
+            bbands = ta.bbands(df['close'], length=window, std=2)
+            df[f'bb_upper_{window}'] = bbands[f'BBU_{window}_2.0_2.0']
+            df[f'bb_lower_{window}'] = bbands[f'BBL_{window}_2.0_2.0']
+            df[f'bb_mid_{window}'] = bbands[f'BBM_{window}_2.0_2.0']
+            # Keep existing bb_width and bb_position calculations
+            df[f'bb_width_{window}'] = (df[f'bb_upper_{window}'] - df[f'bb_lower_{window}']) / df[f'bb_mid_{window}']
+            df[f'bb_position_{window}'] = (df['close'] - df[f'bb_lower_{window}']) / (df[f'bb_upper_{window}'] - df[f'bb_lower_{window}'])
             self.feature_categories['technical'].extend([
-                f'bb_upper_{window}', f'bb_lower_{window}',
+                f'bb_upper_{window}', f'bb_lower_{window}', f'bb_mid_{window}',
                 f'bb_width_{window}', f'bb_position_{window}'
             ])
 
@@ -184,14 +197,10 @@ class FeatureEngineer:
 
     def _add_volatility_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add volatility-based features."""
-        # ATR (Average True Range)
+        # ATR (Average True Range - using pandas-ta)
         for window in [14]:
-            high_low = df['high'] - df['low']
-            high_close = np.abs(df['high'] - df['close'].shift())
-            low_close = np.abs(df['low'] - df['close'].shift())
-            true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
             col_name = f'atr_{window}'
-            df[col_name] = true_range.rolling(window).mean()
+            df[col_name] = ta.atr(df['high'], df['low'], df['close'], length=window)
             df[f'atr_ratio_{window}'] = df[col_name] / df['close']
             self.feature_categories['volatility'].extend([col_name, f'atr_ratio_{window}'])
 
@@ -278,6 +287,70 @@ class FeatureEngineer:
             df[f'skew_{window}'] = returns.rolling(window).skew()
             df[f'kurt_{window}'] = returns.rolling(window).kurt()
             self.feature_categories['statistical'].extend([f'skew_{window}', f'kurt_{window}'])
+
+        return df
+
+    def _add_sentiment_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add sentiment features with strict timestamp alignment."""
+        try:
+            # Ensure timestamp column exists
+            if 'timestamp' not in df.columns:
+                self.logger.warning("No timestamp column - cannot add sentiment features")
+                return df
+
+            # Fetch historical sentiment (cached daily)
+            sentiment_df = self.sentiment.get_historical_sentiment(days=30)
+
+            # Align to OHLCV timestamps (prevents look-ahead bias)
+            df = self.sentiment.align_sentiment_to_ohlcv(df, sentiment_df)
+
+            self.feature_categories['sentiment'].append('fear_greed_index')
+
+            self.logger.info("Added sentiment features")
+
+        except Exception as e:
+            self.logger.warning(f"Could not add sentiment features: {e}")
+
+        return df
+
+    def _add_temporal_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add time-based features."""
+        try:
+            df = self.temporal.extract_features(df)
+
+            # Track temporal features
+            self.feature_categories['temporal'].extend([
+                'hour', 'day_of_week', 'day_of_month', 'month', 'quarter',
+                'is_weekend', 'session_asia', 'session_london',
+                'session_newyork', 'session_offhours', 'is_holiday'
+            ])
+
+            self.logger.info("Added temporal features")
+
+        except Exception as e:
+            self.logger.warning(f"Could not add temporal features: {e}")
+
+        return df
+
+    def _add_regime_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add volatility regime features."""
+        try:
+            # Need sufficient data for HMM
+            if len(df) < 100:
+                self.logger.warning(f"Insufficient data for regime detection: {len(df)} < 100")
+                return df
+
+            df = self.regime_detector.detect_regimes(df, return_col='close')
+
+            # Track regime features
+            self.feature_categories['regime'].extend([
+                'regime_prob_0', 'regime_prob_1', 'current_regime', 'is_low_volatility'
+            ])
+
+            self.logger.info("Added volatility regime features")
+
+        except Exception as e:
+            self.logger.warning(f"Could not add regime features: {e}")
 
         return df
 

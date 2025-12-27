@@ -9,6 +9,11 @@ ta-lib>=0.4.0            # Technical indicators
 pandas>=2.0.0            # Data manipulation
 numpy>=1.24.0            # Numerical computing
 scipy>=1.11.0            # Scientific computing (optimization)
+pandas-ta>=0.4.0         # Enhanced technical indicators (Phase 5)
+pandas_market_calendars>=5.0.0  # Market calendar/trading sessions (Phase 5)
+statsmodels>=0.14.0      # Statistical models for regime detection (Phase 5)
+hmmlearn>=0.3.0          # Hidden Markov Models for volatility regimes (Phase 5)
+fear-and-greed-crypto>=0.1.0  # Crypto sentiment index (Phase 5)
 
 # Machine Learning (Phase 3.1)
 lightgbm>=4.0.0          # Gradient boosting for predictions
