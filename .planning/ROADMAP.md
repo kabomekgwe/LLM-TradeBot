@@ -30,10 +30,10 @@
 - Market microstructure calculations (bid-ask spread, order book depth, trade imbalance, volatility regime detection)
 - Time-based feature engineering (session detection, market events calendar integration)
 
-**Plans**: TBD (run `/gsd:plan-phase 5` to break down)
+**Plans**: 1/1 complete
 
 Plans:
-- [ ] 05-01: TBD
+- [x] [05-01-enhanced-feature-engineering](phases/05-enhanced-feature-engineering/05-01-PLAN.md) - Migrated to pandas-ta, added sentiment/temporal/regime features (86 total features) ✅
 
 #### Phase 6: Ensemble Model Framework
 
@@ -102,7 +102,7 @@ Plans:
 | 2. Complete Agent Implementations | v1.0 | 3/3 | Complete | 2025-12-26 |
 | 3. Comprehensive Testing | v1.0 | 3/3 | Complete | 2025-12-27 |
 | 4. Decision Transparency & Error Handling | v1.0 | 3/3 | Complete | 2025-12-27 |
-| 5. Enhanced Feature Engineering | v1.1 | 0/? | Not started | - |
+| 5. Enhanced Feature Engineering | v1.1 | 1/1 | Complete | 2025-12-27 |
 | 6. Ensemble Model Framework | v1.1 | 0/? | Not started | - |
 | 7. Deep Learning Models | v1.1 | 0/? | Not started | - |
 | 8. Model Evaluation & Backtesting | v1.1 | 0/? | Not started | - |
