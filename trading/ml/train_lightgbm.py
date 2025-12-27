@@ -9,7 +9,12 @@ import lightgbm as lgb
 import talib
 from trading.providers.factory import ExchangeProviderFactory
 from trading.config import TradingConfig
+from trading.logging_config import setup_logging, get_logger
 import os
+
+# Setup logging for training script
+setup_logging(level="INFO", use_json=False)
+logger = get_logger(__name__)
 
 
 async def fetch_historical_data(symbol: str, limit: int = 1000):
@@ -66,11 +71,17 @@ def create_labels(ohlcv, lookahead: int = 5):
 
 async def main():
     symbol = "BTC/USDT"
-    print(f"Fetching historical data for {symbol}...")
+    logger.info(
+        "fetching_historical_data",
+        extra={"symbol": symbol, "limit": 1000}
+    )
 
     # Fetch historical data
     ohlcv = await fetch_historical_data(symbol, limit=1000)
-    print(f"Fetched {len(ohlcv)} candles")
+    logger.info(
+        "data_fetched",
+        extra={"symbol": symbol, "candles_count": len(ohlcv)}
+    )
 
     # Calculate features
     features = calculate_features(ohlcv)
@@ -86,7 +97,10 @@ async def main():
     features = features[:min_len]
     labels = labels[:min_len]
 
-    print(f"Training samples: {len(features)} (after removing NaN)")
+    logger.info(
+        "training_data_prepared",
+        extra={"training_samples": len(features), "note": "after removing NaN"}
+    )
 
     # Split train/validation (80/20)
     split_idx = int(len(features) * 0.8)
@@ -108,7 +122,7 @@ async def main():
         'verbose': -1
     }
 
-    print("Training LightGBM model...")
+    logger.info("training_model", extra={"model_type": "LightGBM", "num_boost_round": 1000})
     bst = lgb.train(
         params,
         train_data,
@@ -121,8 +135,13 @@ async def main():
     os.makedirs('trading/ml/models', exist_ok=True)
     model_path = 'trading/ml/models/lgbm_predictor.txt'
     bst.save_model(model_path)
-    print(f"Model saved to {model_path}")
-    print(f"Best iteration: {bst.best_iteration}")
+    logger.info(
+        "model_saved",
+        extra={
+            "model_path": model_path,
+            "best_iteration": bst.best_iteration
+        }
+    )
 
 
 if __name__ == "__main__":

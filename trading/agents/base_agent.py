@@ -3,12 +3,13 @@
 All 8 agents in the adversarial decision system inherit from this base class.
 """
 
-import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
 from ..config import TradingConfig
 from ..providers.base import BaseExchangeProvider
+from ..logging_config import get_logger, DecisionContext
+from ..utils.timeout import with_timeout
 
 
 class BaseAgent(ABC):
@@ -27,21 +28,27 @@ class BaseAgent(ABC):
         """
         self.provider = provider
         self.config = config
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = get_logger(self.__class__.__name__)
 
     @abstractmethod
+    @with_timeout(60.0)  # 60s timeout for agent execution
     async def execute(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Execute agent logic.
+        """Execute agent logic with timeout protection.
 
         This is the main entry point for each agent. Takes a context dictionary
         containing all available data and returns an updated context with the
         agent's output.
+
+        Protected by 60s timeout to prevent infinite loops or hanging operations.
 
         Args:
             context: Shared context dictionary with market data, signals, etc.
 
         Returns:
             Updated context dictionary with agent's contribution
+
+        Raises:
+            AgentTimeoutError: If execution exceeds 60 seconds
 
         Example:
             >>> agent = DataSyncAgent(provider, config)
@@ -60,12 +67,21 @@ class BaseAgent(ABC):
         """
         return self.__class__.__name__
 
-    def log_decision(self, message: str, level: str = "info") -> None:
-        """Log agent decision with consistent formatting.
+    def log_decision(self, message: str, level: str = "info", **extra_data) -> None:
+        """Log agent decision with structured logging and decision context.
 
         Args:
             message: Log message
             level: Log level ("info", "warning", "error")
+            **extra_data: Additional context fields to include in log
         """
         log_method = getattr(self.logger, level, self.logger.info)
-        log_method(f"[{self.get_agent_name()}] {message}")
+
+        # Merge decision context with extra data
+        log_extra = {
+            **DecisionContext.get_extra(),
+            "agent": self.get_agent_name(),
+            **extra_data,
+        }
+
+        log_method(message, extra=log_extra)

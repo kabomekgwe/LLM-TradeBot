@@ -8,6 +8,7 @@ import asyncio
 from typing import Any
 
 from .base_agent import BaseAgent
+from ..logging_config import DecisionContext
 
 
 class DataSyncAgent(BaseAgent):
@@ -39,24 +40,42 @@ class DataSyncAgent(BaseAgent):
         if not symbol:
             raise ValueError("Symbol is required in context")
 
-        self.log_decision(f"Fetching market data for {symbol}")
+        self.log_decision(
+            "fetching_market_data",
+            symbol=symbol
+        )
 
         # Fetch multiple timeframes in parallel for efficiency
         timeframes = ["5m", "15m", "1h"]
 
-        # Create tasks for parallel execution
-        tasks = [
-            self.provider.fetch_ohlcv(symbol, tf, limit=200)
-            for tf in timeframes
-        ]
-
-        # Also fetch ticker and orderbook
-        tasks.append(self.provider.fetch_ticker(symbol))
-        tasks.append(self.provider.fetch_orderbook(symbol, limit=20))
-
         try:
-            # Execute all fetches in parallel
-            results = await asyncio.gather(*tasks)
+            # Execute fetches with timeout protection (30s each for OHLCV)
+            # Use asyncio.wait_for for individual timeout control
+            ohlcv_5m = await asyncio.wait_for(
+                self.provider.fetch_ohlcv(symbol, "5m", limit=200),
+                timeout=30.0
+            )
+            ohlcv_15m = await asyncio.wait_for(
+                self.provider.fetch_ohlcv(symbol, "15m", limit=200),
+                timeout=30.0
+            )
+            ohlcv_1h = await asyncio.wait_for(
+                self.provider.fetch_ohlcv(symbol, "1h", limit=200),
+                timeout=30.0
+            )
+
+            # Fetch ticker and orderbook with shorter timeout (10s)
+            ticker = await asyncio.wait_for(
+                self.provider.fetch_ticker(symbol),
+                timeout=10.0
+            )
+            orderbook = await asyncio.wait_for(
+                self.provider.fetch_orderbook(symbol, limit=20),
+                timeout=10.0
+            )
+
+            # Unpack for compatibility with existing code
+            results = [ohlcv_5m, ohlcv_15m, ohlcv_1h, ticker, orderbook]
 
             # Unpack results
             ohlcv_5m, ohlcv_15m, ohlcv_1h, ticker, orderbook = results
@@ -74,14 +93,32 @@ class DataSyncAgent(BaseAgent):
             }
 
             self.log_decision(
-                f"Successfully fetched data: "
-                f"5m={len(ohlcv_5m)}, 15m={len(ohlcv_15m)}, 1h={len(ohlcv_1h)} candles"
+                "data_sync_complete",
+                symbol=symbol,
+                candles_5m=len(ohlcv_5m),
+                candles_15m=len(ohlcv_15m),
+                candles_1h=len(ohlcv_1h),
+                ticker_price=ticker.last if ticker else None,
             )
 
             return {"market_data": market_data}
 
+        except asyncio.TimeoutError:
+            self.log_decision(
+                "data_fetch_timeout",
+                level="error",
+                symbol=symbol,
+                timeout_seconds=30,
+            )
+            raise
         except Exception as e:
-            self.log_decision(f"Failed to fetch market data: {e}", level="error")
+            self.log_decision(
+                "data_fetch_failed",
+                level="error",
+                symbol=symbol,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             raise
 
     def _validate_ohlcv_data(self, ohlcv_list: list) -> bool:

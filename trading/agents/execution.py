@@ -4,6 +4,7 @@ This is Agent #8 in the 8-agent system.
 Handles precise order execution and lifecycle tracking with advanced order types.
 """
 
+import asyncio
 from typing import Any, Optional
 
 from ..state import TradingState
@@ -100,15 +101,19 @@ class ExecutionEngine(BaseAgent):
             confidence = decision.get("confidence", 0.5)
             amount = amount * confidence
 
-            # Create bracket order (entry + stop loss + take profit)
-            entry_order, stop_order, tp_order = await self.order_manager.create_bracket_order(
-                symbol=symbol,
-                side=action,
-                amount=amount,
-                entry_price=current_price,
-                stop_loss_price=stop_loss_price,
-                take_profit_price=take_profit_price,
-                order_type="market",  # Market order for immediate execution
+            # Create bracket order (entry + stop loss + take profit) with timeout
+            # 15s timeout for order placement (no retry to avoid duplicate orders)
+            entry_order, stop_order, tp_order = await asyncio.wait_for(
+                self.order_manager.create_bracket_order(
+                    symbol=symbol,
+                    side=action,
+                    amount=amount,
+                    entry_price=current_price,
+                    stop_loss_price=stop_loss_price,
+                    take_profit_price=take_profit_price,
+                    order_type="market",  # Market order for immediate execution
+                ),
+                timeout=15.0
             )
 
             self.log_decision(
@@ -146,8 +151,29 @@ class ExecutionEngine(BaseAgent):
                 }
             }
 
+        except asyncio.TimeoutError:
+            self.log_decision(
+                "order_placement_timeout",
+                level="error",
+                symbol=symbol,
+                action=action,
+                timeout_seconds=15,
+            )
+            return {
+                "execution": {
+                    "success": False,
+                    "error": "Order placement exceeded 15s timeout",
+                }
+            }
         except Exception as e:
-            self.log_decision(f"Execution failed: {e}", level="error")
+            self.log_decision(
+                "execution_failed",
+                level="error",
+                symbol=symbol,
+                action=action,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return {
                 "execution": {
                     "success": False,

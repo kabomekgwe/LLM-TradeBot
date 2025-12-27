@@ -4,7 +4,7 @@ This module provides the TradingManager class that coordinates all agents
 and manages the trading lifecycle.
 """
 
-import logging
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +12,7 @@ from .config import TradingConfig
 from .state import TradingState
 from .providers.factory import create_provider
 from .providers.base import BaseExchangeProvider
+from .logging_config import get_logger, DecisionContext
 
 # Import all 8 agents
 from .agents.data_sync import DataSyncAgent
@@ -57,7 +58,7 @@ class TradingManager:
             ValueError: If configuration is invalid
         """
         self.spec_dir = spec_dir
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
 
         # Load configuration from environment
         self.config = TradingConfig.from_env(provider)
@@ -146,7 +147,17 @@ class TradingManager:
                 "Reset manually to resume trading."
             )
 
-        self.logger.info(f"=== Starting trading loop for {symbol} ===")
+        # Generate decision ID for tracing
+        decision_id = str(uuid.uuid4())
+        DecisionContext.set_decision_id(decision_id)
+
+        self.logger.info(
+            "decision_start",
+            extra={
+                **DecisionContext.get_extra(),
+                "symbol": symbol,
+            }
+        )
 
         # Initialize context with symbol and state
         context = {
@@ -156,39 +167,69 @@ class TradingManager:
 
         try:
             # Step 1: Fetch market data
-            self.logger.info("[1/8] DataSyncAgent - Fetching market data")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "DataSyncAgent", "step": "1/8"}
+            )
             context.update(await self.agents["data_sync"].execute(context))
 
             # Step 2: Technical analysis
-            self.logger.info("[2/8] QuantAnalystAgent - Generating technical signals")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "QuantAnalystAgent", "step": "2/8"}
+            )
             context.update(await self.agents["quant_analyst"].execute(context))
 
             # Step 3: ML prediction
-            self.logger.info("[3/8] PredictAgent - Running ML forecast")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "PredictAgent", "step": "3/8"}
+            )
             context.update(await self.agents["predict"].execute(context))
 
             # Step 4: Adversarial analysis (Bull + Bear in sequence)
-            self.logger.info("[4/8] BullAgent - Analyzing bullish signals")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "BullAgent", "step": "4/8"}
+            )
             bull_result = await self.agents["bull"].execute(context)
             context.update(bull_result)
 
-            self.logger.info("[5/8] BearAgent - Analyzing bearish signals")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "BearAgent", "step": "5/8"}
+            )
             bear_result = await self.agents["bear"].execute(context)
             context.update(bear_result)
 
             # Step 5: Decision aggregation
-            self.logger.info("[6/8] DecisionCoreAgent - Aggregating votes")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "DecisionCoreAgent", "step": "6/8"}
+            )
             context.update(await self.agents["decision_core"].execute(context))
 
             # Step 6: Risk veto
-            self.logger.info("[7/8] RiskAuditAgent - Safety validation")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "RiskAuditAgent", "step": "7/8"}
+            )
             context.update(await self.agents["risk_audit"].execute(context))
 
             # Check if vetoed
             risk_audit = context.get("risk_audit", {})
             if risk_audit.get("veto", False):
                 veto_reason = risk_audit.get("reason", "Unknown reason")
-                self.logger.warning(f"Trade vetoed by RiskAuditAgent: {veto_reason}")
+                self.logger.warning(
+                    "decision_vetoed",
+                    extra={
+                        **DecisionContext.get_extra(),
+                        "veto_reason": veto_reason,
+                    }
+                )
+
+                # Clear decision context
+                DecisionContext.clear()
 
                 return {
                     "success": False,
@@ -198,7 +239,10 @@ class TradingManager:
                 }
 
             # Step 7: Execution
-            self.logger.info("[8/8] ExecutionEngine - Placing orders")
+            self.logger.info(
+                "agent_start",
+                extra={**DecisionContext.get_extra(), "agent": "ExecutionEngine", "step": "8/8"}
+            )
             context.update(await self.agents["execution"].execute(context))
 
             # Extract execution result
@@ -211,9 +255,18 @@ class TradingManager:
 
                 decision = context.get("decision", {})
                 self.logger.info(
-                    f"=== Trading loop completed successfully: "
-                    f"{decision.get('action')} @ ${execution.get('price', 0):.2f} ==="
+                    "decision_executed",
+                    extra={
+                        **DecisionContext.get_extra(),
+                        "action": decision.get("action"),
+                        "price": execution.get("price"),
+                        "amount": execution.get("amount"),
+                        "confidence": decision.get("confidence"),
+                    }
                 )
+
+                # Clear decision context
+                DecisionContext.clear()
 
                 return {
                     "success": True,
@@ -224,7 +277,16 @@ class TradingManager:
                     "confidence": decision.get("confidence"),
                 }
             else:
-                self.logger.warning(f"Execution failed: {execution.get('error')}")
+                self.logger.warning(
+                    "execution_failed",
+                    extra={
+                        **DecisionContext.get_extra(),
+                        "error": execution.get("error"),
+                    }
+                )
+
+                # Clear decision context
+                DecisionContext.clear()
 
                 return {
                     "success": False,
@@ -233,7 +295,18 @@ class TradingManager:
                 }
 
         except Exception as e:
-            self.logger.error(f"Trading loop error: {e}", exc_info=True)
+            self.logger.error(
+                "trading_loop_error",
+                extra={
+                    **DecisionContext.get_extra(),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True
+            )
+
+            # Clear decision context
+            DecisionContext.clear()
 
             return {
                 "success": False,

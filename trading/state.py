@@ -12,6 +12,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class TradingState:
@@ -119,7 +123,14 @@ class TradingState:
 
         except (OSError, json.JSONDecodeError) as e:
             # Log error but return None for graceful degradation
-            print(f"Warning: Failed to load trading state from {state_file}: {e}")
+            logger.warning(
+                "state_load_failed",
+                extra={
+                    "state_file": str(state_file),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
             return None
 
     @classmethod
