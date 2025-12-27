@@ -49,10 +49,10 @@ Plans:
 - Model correlation analysis and diversity metrics
 - Feature importance aggregation across models
 
-**Plans**: TBD
+**Plans**: 0/1 plans
 
 Plans:
-- [ ] 06-01: TBD
+- [ ] [06-01-ensemble-model-framework](phases/06-ensemble-model-framework/06-01-PLAN.md) - Install XGBoost, implement regime-aware ensemble with 3 models, integrate with PredictAgent
 
 #### Phase 7: Deep Learning Models
 
