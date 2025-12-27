@@ -13,6 +13,7 @@ from trading.ml.evaluation.metrics import (
     calculate_max_drawdown,
     calculate_win_rate
 )
+from trading.ml.evaluation.report_generator import PerformanceReportGenerator
 
 __all__ = [
     'WalkForwardValidator',
@@ -20,5 +21,6 @@ __all__ = [
     'calculate_sharpe_ratio',
     'calculate_sortino_ratio',
     'calculate_max_drawdown',
-    'calculate_win_rate'
+    'calculate_win_rate',
+    'PerformanceReportGenerator'
 ]
