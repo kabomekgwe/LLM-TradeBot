@@ -89,10 +89,10 @@ Plans:
 - Backtesting frameworks (backtesting.py, vectorbt, custom implementation trade-offs)
 - Realistic trading simulation (slippage models, transaction costs, market impact)
 
-**Plans**: TBD
+**Plans**: 1 of 2 complete
 
 Plans:
-- [ ] 08-01: TBD
+- [x] [08-01-walk-forward-validation-metrics](phases/08-model-evaluation-backtesting/08-01-PLAN.md) - Walk-forward validation, financial metrics (Sharpe, Sortino, max drawdown) ✅
 
 ---
 
