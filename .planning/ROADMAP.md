@@ -89,7 +89,7 @@ Plans:
 - Backtesting frameworks (backtesting.py, vectorbt, custom implementation trade-offs)
 - Realistic trading simulation (slippage models, transaction costs, market impact)
 
-**Plans**: 1 of 2 complete
+**Plans**: 2/2 complete
 
 Plans:
 - [x] [08-01-walk-forward-validation-metrics](phases/08-model-evaluation-backtesting/08-01-PLAN.md) - Walk-forward validation, financial metrics (Sharpe, Sortino, max drawdown) ✅
@@ -107,7 +107,7 @@ Plans:
 | 5. Enhanced Feature Engineering | v1.1 | 1/1 | Complete | 2025-12-27 |
 | 6. Ensemble Model Framework | v1.1 | 1/1 | Complete | 2025-12-27 |
 | 7. Deep Learning Models | v1.1 | 3/3 | Complete | 2025-12-27 |
-| 8. Model Evaluation & Backtesting | v1.1 | 0/? | Not started | - |
+| 8. Model Evaluation & Backtesting | v1.1 | 0/? | Complete | - |
 
 ---
 
