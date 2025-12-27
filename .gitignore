@@ -51,6 +51,7 @@ env/
 logs/
 *.log
 data/
+!trading/ml/deep_learning/data/  # Include deep learning data module (source code, not data files)
 *.db
 *.sqlite
 .trading_state.json
