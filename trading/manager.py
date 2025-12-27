@@ -4,6 +4,7 @@ This module provides the TradingManager class that coordinates all agents
 and manages the trading lifecycle.
 """
 
+import os
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,14 @@ from .exceptions import (
     ConfigurationError,
     TradingBotError,
 )
+
+# Import safety controls
+from .safety.thresholds import SafetyThresholds
+from .safety.kill_switch import KillSwitch
+from .safety.circuit_breaker import CircuitBreaker
+from .safety.position_limits import PositionLimitEnforcer
+from .analytics.risk_calculator import RiskCalculator
+from .memory.trade_history import TradeJournal
 
 # Import all 8 agents
 from .agents.data_sync import DataSyncAgent
@@ -116,6 +125,14 @@ class TradingManager:
             self.enabled = False
             return
 
+        # Initialize safety components
+        self.thresholds = SafetyThresholds()
+        self.kill_switch = KillSwitch(secret_key=os.getenv("KILL_SWITCH_SECRET", "default-secret-change-me"))
+        self.risk_calculator = RiskCalculator()
+        self.trade_journal = TradeJournal(spec_dir / ".trade_journal.db")
+        self.circuit_breaker = CircuitBreaker(self.thresholds, self.risk_calculator)
+        self.position_limits = PositionLimitEnforcer(self.thresholds)
+
         # Initialize all 8 agents
         self.agents = {
             "data_sync": DataSyncAgent(self.provider, self.config),
@@ -136,11 +153,25 @@ class TradingManager:
             self.state.created_at = datetime.now().isoformat()
             self.state.save(spec_dir)
 
+        self.logger.info(
+            "safety_systems_initialized",
+            extra={
+                "kill_switch": "active",
+                "circuit_breaker": "armed",
+                "position_limits": "enforced",
+            }
+        )
+
     async def run_trading_loop(self, symbol: str = "BTC/USDT") -> dict:
-        """Execute the complete 8-agent trading loop.
+        """Execute the complete 8-agent trading loop with safety controls.
 
         This is the heart of the trading system. Runs all 8 agents in sequence
-        and returns the final execution result.
+        with safety checkpoints at each critical stage.
+
+        Safety checkpoints (in order):
+        1. Kill switch check (highest priority - immediate halt)
+        2. Circuit breaker check (auto-pause on threshold breach)
+        3. Position limit check (before order placement)
 
         Args:
             symbol: Trading pair symbol (e.g., "BTC/USDT")
@@ -158,11 +189,38 @@ class TradingManager:
             ...     print(f"Executed: {result['action']}")
 
         Raises:
-            RuntimeError: If trading is not enabled or circuit breaker is tripped
+            RuntimeError: If trading is not enabled or safety controls block trading
         """
         if not self.enabled:
             raise RuntimeError("Trading is not enabled - check configuration")
 
+        # SAFETY CHECKPOINT 1: Kill switch check (highest priority)
+        if self.kill_switch.is_active():
+            self.logger.critical(
+                "kill_switch_blocked_trading",
+                extra={
+                    "kill_switch_status": self.kill_switch.get_status(),
+                }
+            )
+            raise RuntimeError(
+                "KILL SWITCH ACTIVE - ALL TRADING STOPPED. "
+                f"Reason: {self.kill_switch.get_status()['reason']}"
+            )
+
+        # SAFETY CHECKPOINT 2: Circuit breaker check
+        if self.circuit_breaker.is_open():
+            self.logger.warning(
+                "circuit_breaker_blocked_trading",
+                extra={
+                    "circuit_breaker_status": self.circuit_breaker.get_status(),
+                }
+            )
+            raise RuntimeError(
+                f"Circuit breaker open - trading paused. "
+                f"Reason: {self.circuit_breaker.get_status()['trip_reason']}"
+            )
+
+        # Legacy state check (backwards compatibility)
         if self.state.circuit_breaker_tripped:
             raise RuntimeError(
                 f"Circuit breaker tripped: {self.state.last_circuit_trip_reason}. "
@@ -287,6 +345,21 @@ class TradingManager:
                     }
                 )
 
+                # SAFETY CHECKPOINT 4: Update circuit breaker after successful trade
+                # Get trade history from journal and check thresholds
+                trades = self.trade_journal.get_all_trades()
+                balance = await self.get_balance()
+                current_equity = balance.get("total", 10000.0) if balance else 10000.0
+
+                if self.circuit_breaker.check_and_update(trades, current_equity):
+                    self.logger.critical(
+                        "circuit_breaker_tripped_after_trade",
+                        extra={
+                            "circuit_status": self.circuit_breaker.get_status(),
+                        }
+                    )
+                    # Circuit breaker has tripped - trading will be blocked next iteration
+
                 # Clear decision context
                 DecisionContext.clear()
 
@@ -333,12 +406,14 @@ class TradingManager:
                 "error": f"Agent error: {e}",
             }
         except APIError as e:
-            # API errors - log and retry next iteration
+            # API errors - log and record in circuit breaker
+            self.circuit_breaker.record_api_error()
             self.logger.warning(
                 "api_error_in_trading_loop",
                 extra={
                     **DecisionContext.get_extra(),
                     "error": str(e),
+                    "circuit_status": self.circuit_breaker.get_status(),
                 },
             )
             DecisionContext.clear()

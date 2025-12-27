@@ -48,7 +48,7 @@ async def cmd_status():
 
         state_data = None
         if state_files:
-            from integrations.trading.state import TradingState
+            from trading.state import TradingState
             state = TradingState.load(state_files[0].parent)
             state_data = {
                 "initialized": state.initialized,
@@ -87,6 +87,79 @@ async def cmd_status():
     except Exception as e:
         logger.critical("cli_unexpected_error", extra={"command": "status", "error": str(e)}, exc_info=True)
         json_output({"success": False, "error": f"Unexpected error: {e}"})
+        sys.exit(1)
+
+
+async def cmd_safety_status():
+    """Get safety system status (kill switch, circuit breaker, position limits)."""
+    try:
+        from trading.safety.thresholds import SafetyThresholds
+        from trading.safety.kill_switch import KillSwitch
+        from trading.safety.circuit_breaker import CircuitBreaker, CircuitState
+        from trading.safety.position_limits import PositionLimitEnforcer
+        from trading.analytics.risk_calculator import RiskCalculator
+        import os
+
+        # Initialize safety components (read-only status check)
+        thresholds = SafetyThresholds()
+        kill_switch = KillSwitch(secret_key=os.getenv("KILL_SWITCH_SECRET", "default"))
+        risk_calculator = RiskCalculator()
+        circuit_breaker = CircuitBreaker(thresholds, risk_calculator)
+        position_limits = PositionLimitEnforcer(thresholds)
+
+        # Format output
+        print("Safety System Status")
+        print("=" * 60)
+        print()
+
+        # Kill Switch
+        ks_status = kill_switch.get_status()
+        print("Kill Switch: " + ("ACTIVE" if ks_status["active"] else "INACTIVE"))
+        if ks_status["active"]:
+            print(f"  Triggered at: {ks_status['triggered_at']}")
+            print(f"  Triggered by: {ks_status['triggered_by']}")
+            print(f"  Reason: {ks_status['reason']}")
+        print()
+
+        # Circuit Breaker
+        cb_status = circuit_breaker.get_status()
+        print(f"Circuit Breaker: {cb_status['state'].upper()} (trading {'PAUSED' if cb_status['is_open'] else 'ENABLED'})")
+        if cb_status["is_open"]:
+            print(f"  Tripped at: {cb_status['tripped_at']}")
+            print(f"  Reason: {cb_status['trip_reason']}")
+        print(f"  Consecutive losses: {cb_status['consecutive_losses']}")
+        print(f"  API errors (last minute): {cb_status['api_errors_last_minute']}")
+        print(f"  Order failures: {cb_status['order_failures']}")
+        print(f"  Failed trades (last hour): {cb_status['failed_trades_last_hour']}")
+        print()
+
+        # Position Limits
+        pl_status = position_limits.get_status()
+        limits = pl_status["limits"]
+        print("Position Limits:")
+        print(f"  Per-symbol: {limits['max_position_pct_per_symbol']:.1%} max")
+        print(f"  Per-strategy: {limits['max_position_pct_per_strategy']:.1%} max")
+        print(f"  Portfolio-wide: {limits['max_total_exposure_pct']:.1%} max")
+        print(f"  Max positions: {limits['max_concurrent_positions']}")
+        print()
+        print(f"  Current positions: {pl_status['total_positions']}")
+        print(f"  Total exposure: ${pl_status['total_exposure_usd']:,.2f}")
+        print()
+
+        # Thresholds
+        print("Safety Thresholds:")
+        thresh_dict = thresholds.to_dict()
+        print(f"  Daily drawdown: {thresh_dict['max_daily_drawdown_pct']:.1f}%")
+        print(f"  Weekly drawdown: {thresh_dict['max_weekly_drawdown_pct']:.1f}%")
+        print(f"  Total drawdown: {thresh_dict['max_total_drawdown_pct']:.1f}%")
+        print(f"  Consecutive losses: {thresh_dict['max_consecutive_losses']}")
+        print(f"  Failed trades/hour: {thresh_dict['max_failed_trades_per_hour']}")
+        print(f"  API errors/minute: {thresh_dict['max_api_errors_per_minute']}")
+        print(f"  Order failures: {thresh_dict['max_order_failures']}")
+
+    except Exception as e:
+        logger.critical("cli_safety_status_error", extra={"error": str(e)}, exc_info=True)
+        print(f"Error: {e}")
         sys.exit(1)
 
 
@@ -330,6 +403,9 @@ def main():
     # Status command
     subparsers.add_parser("status", help="Get trading system status")
 
+    # Safety status command
+    subparsers.add_parser("safety", help="Get safety system status (kill switch, circuit breaker, limits)")
+
     # Positions command
     subparsers.add_parser("positions", help="Get current positions and balance")
 
@@ -359,6 +435,8 @@ def main():
     # Execute command
     if args.command == "status":
         asyncio.run(cmd_status())
+    elif args.command == "safety":
+        asyncio.run(cmd_safety_status())
     elif args.command == "positions":
         asyncio.run(cmd_positions())
     elif args.command == "run":

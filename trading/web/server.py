@@ -6,11 +6,13 @@ Serves static frontend files and manages real-time data broadcasting.
 
 import logging
 import asyncio
+import os
+import json
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +21,7 @@ import uvicorn
 from ..config import TradingConfig
 from ..memory.trade_history import TradeJournal
 from .websocket import WebSocketManager, MessageType
+from ..safety.kill_switch import KillSwitch
 
 
 class DashboardServer:
@@ -40,6 +43,7 @@ class DashboardServer:
         self,
         config: TradingConfig,
         trade_journal: Optional[TradeJournal] = None,
+        kill_switch: Optional[KillSwitch] = None,
         host: str = "0.0.0.0",
         port: int = 5173,
     ):
@@ -48,11 +52,13 @@ class DashboardServer:
         Args:
             config: Trading configuration
             trade_journal: Optional trade journal for historical data
+            kill_switch: Optional kill switch instance for safety endpoints
             host: Server host (default: 0.0.0.0)
             port: Server port (default: 5173)
         """
         self.config = config
         self.trade_journal = trade_journal
+        self.kill_switch = kill_switch
         self.host = host
         self.port = port
         self.logger = logging.getLogger(__name__)
@@ -168,6 +174,119 @@ class DashboardServer:
 
             decisions = self.trade_journal.get_agent_decisions(limit=limit)
             return JSONResponse(decisions)
+
+        # Kill switch endpoints (safety controls)
+        @self.app.post("/api/v1/safety/kill-switch/trigger")
+        async def trigger_kill_switch(
+            request: Request,
+            x_hmac_signature: Optional[str] = Header(None, alias="X-HMAC-Signature")
+        ):
+            """Trigger kill switch - emergency shutdown.
+
+            Requires HMAC-SHA256 signature in X-HMAC-Signature header.
+
+            Body:
+                {
+                    "reason": "Emergency shutdown reason",
+                    "triggered_by": "user@example.com"
+                }
+            """
+            if not self.kill_switch:
+                raise HTTPException(status_code=503, detail="Kill switch not initialized")
+
+            # Verify HMAC signature
+            body = await request.body()
+            body_str = body.decode()
+
+            if not x_hmac_signature:
+                raise HTTPException(status_code=401, detail="Missing X-HMAC-Signature header")
+
+            if not self.kill_switch.verify_hmac(body_str, x_hmac_signature):
+                self.logger.warning("kill_switch_invalid_signature")
+                raise HTTPException(status_code=401, detail="Invalid HMAC signature")
+
+            # Parse body
+            try:
+                data = json.loads(body_str)
+                reason = data.get("reason", "No reason provided")
+                triggered_by = data.get("triggered_by", "Unknown")
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+            # Trigger kill switch
+            success = self.kill_switch.trigger(reason, triggered_by)
+
+            return JSONResponse({
+                "success": success,
+                "message": "Kill switch triggered - ALL TRADING STOPPED" if success else "Kill switch already active",
+                "status": self.kill_switch.get_status()
+            })
+
+        @self.app.get("/api/v1/safety/kill-switch/status")
+        async def get_kill_switch_status(
+            x_hmac_signature: Optional[str] = Header(None, alias="X-HMAC-Signature")
+        ):
+            """Get kill switch status.
+
+            Requires HMAC-SHA256 signature in X-HMAC-Signature header.
+            Message to sign is empty string for GET requests.
+            """
+            if not self.kill_switch:
+                raise HTTPException(status_code=503, detail="Kill switch not initialized")
+
+            # Verify HMAC signature (empty message for GET)
+            if not x_hmac_signature:
+                raise HTTPException(status_code=401, detail="Missing X-HMAC-Signature header")
+
+            if not self.kill_switch.verify_hmac("", x_hmac_signature):
+                self.logger.warning("kill_switch_status_invalid_signature")
+                raise HTTPException(status_code=401, detail="Invalid HMAC signature")
+
+            return JSONResponse(self.kill_switch.get_status())
+
+        @self.app.post("/api/v1/safety/kill-switch/reset")
+        async def reset_kill_switch(
+            request: Request,
+            x_hmac_signature: Optional[str] = Header(None, alias="X-HMAC-Signature")
+        ):
+            """Reset kill switch - resume trading.
+
+            Requires HMAC-SHA256 signature in X-HMAC-Signature header.
+
+            Body:
+                {
+                    "reset_by": "user@example.com"
+                }
+            """
+            if not self.kill_switch:
+                raise HTTPException(status_code=503, detail="Kill switch not initialized")
+
+            # Verify HMAC signature
+            body = await request.body()
+            body_str = body.decode()
+
+            if not x_hmac_signature:
+                raise HTTPException(status_code=401, detail="Missing X-HMAC-Signature header")
+
+            if not self.kill_switch.verify_hmac(body_str, x_hmac_signature):
+                self.logger.warning("kill_switch_reset_invalid_signature")
+                raise HTTPException(status_code=401, detail="Invalid HMAC signature")
+
+            # Parse body
+            try:
+                data = json.loads(body_str)
+                reset_by = data.get("reset_by", "Unknown")
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+            # Reset kill switch
+            success = self.kill_switch.reset(reset_by)
+
+            return JSONResponse({
+                "success": success,
+                "message": "Kill switch reset - trading may resume" if success else "Kill switch already inactive",
+                "status": self.kill_switch.get_status()
+            })
 
         # Static files - serve frontend
         static_dir = Path(__file__).parent / "static"

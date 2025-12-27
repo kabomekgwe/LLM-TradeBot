@@ -11,6 +11,14 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass, field
 
+# Import PositionLimitEnforcer for enhanced position limit checks
+try:
+    from ..safety.position_limits import PositionLimitEnforcer
+    from ..safety.thresholds import SafetyThresholds
+    SAFETY_MODULE_AVAILABLE = True
+except ImportError:
+    SAFETY_MODULE_AVAILABLE = False
+
 
 @dataclass
 class Position:
@@ -66,6 +74,7 @@ class PortfolioManager:
         max_total_capital: float = 100000,
         max_position_pct: float = 0.5,
         max_symbols: int = 10,
+        position_limit_enforcer: Optional['PositionLimitEnforcer'] = None,
     ):
         """Initialize portfolio manager.
 
@@ -74,6 +83,7 @@ class PortfolioManager:
             max_total_capital: Maximum total portfolio capital
             max_position_pct: Maximum percentage per position (0-1)
             max_symbols: Maximum number of concurrent positions
+            position_limit_enforcer: Optional enhanced position limit enforcer
         """
         self.logger = logging.getLogger(__name__)
 
@@ -81,6 +91,9 @@ class PortfolioManager:
         self.max_total_capital = max_total_capital
         self.max_position_pct = max_position_pct
         self.max_symbols = max_symbols
+
+        # Enhanced position limit enforcer (optional)
+        self.position_limit_enforcer = position_limit_enforcer
 
         # Positions: symbol -> Position
         self.positions: Dict[str, Position] = {}
@@ -102,6 +115,7 @@ class PortfolioManager:
         amount: float,
         entry_price: float,
         side: str = "long",
+        strategy: str = "default",
     ) -> bool:
         """Add or increase position.
 
@@ -110,6 +124,7 @@ class PortfolioManager:
             amount: Amount to add
             entry_price: Entry price
             side: Position side (long/short)
+            strategy: Strategy name for position limit tracking
 
         Returns:
             True if position added successfully
@@ -130,13 +145,27 @@ class PortfolioManager:
             self.logger.warning(f"Insufficient cash: need ${cost:,.2f}, have ${self.cash_balance:,.2f}")
             return False
 
-        # Check position size limit
-        total_value = self.get_total_value()
-        if total_value > 0:
-            position_pct = cost / (total_value + self.cash_balance)
-            if position_pct > self.max_position_pct:
-                self.logger.warning(f"Position size {position_pct:.1%} exceeds limit {self.max_position_pct:.1%}")
+        # Enhanced position limit check (if enforcer available)
+        if self.position_limit_enforcer:
+            current_portfolio_value = self.get_total_value()
+            allowed, rejection_reason = self.position_limit_enforcer.check_new_position(
+                symbol=symbol,
+                strategy=strategy,
+                position_size_usd=cost,
+                current_portfolio_value=current_portfolio_value,
+            )
+            if not allowed:
+                self.logger.warning(f"Position rejected by limit enforcer: {rejection_reason}")
                 return False
+
+        # Legacy position size limit check (fallback if no enforcer)
+        if not self.position_limit_enforcer:
+            total_value = self.get_total_value()
+            if total_value > 0:
+                position_pct = cost / (total_value + self.cash_balance)
+                if position_pct > self.max_position_pct:
+                    self.logger.warning(f"Position size {position_pct:.1%} exceeds limit {self.max_position_pct:.1%}")
+                    return False
 
         # Add or update position
         if symbol in self.positions:
@@ -165,6 +194,16 @@ class PortfolioManager:
 
         # Update cash balance
         self.cash_balance -= cost
+
+        # Track position in limit enforcer (if available)
+        if self.position_limit_enforcer:
+            timestamp = datetime.now().timestamp()
+            self.position_limit_enforcer.add_position(
+                symbol=symbol,
+                strategy=strategy,
+                position_size_usd=cost,
+                timestamp=timestamp,
+            )
 
         return True
 
