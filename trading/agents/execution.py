@@ -7,9 +7,18 @@ Handles precise order execution and lifecycle tracking with advanced order types
 import asyncio
 from typing import Any, Optional
 
+import ccxt
+
 from ..state import TradingState
 from .base_agent import BaseAgent
 from ..orders import OrderManager, BracketOrder
+from ..exceptions import (
+    OrderRejectedError,
+    InsufficientBalanceError,
+    ExchangeConnectionError,
+    AgentTimeoutError,
+    TradingBotError,
+)
 
 
 class ExecutionEngine(BaseAgent):
@@ -152,6 +161,7 @@ class ExecutionEngine(BaseAgent):
             }
 
         except asyncio.TimeoutError:
+            # Timeout from asyncio.wait_for
             self.log_decision(
                 "order_placement_timeout",
                 level="error",
@@ -165,18 +175,68 @@ class ExecutionEngine(BaseAgent):
                     "error": "Order placement exceeded 15s timeout",
                 }
             }
-        except Exception as e:
+        except ccxt.InsufficientFunds as e:
+            # Insufficient balance - don't retry
             self.log_decision(
-                "execution_failed",
+                "insufficient_balance",
                 level="error",
                 symbol=symbol,
                 action=action,
                 error=str(e),
-                error_type=type(e).__name__,
             )
             return {
                 "execution": {
                     "success": False,
-                    "error": str(e),
+                    "error": f"Insufficient balance: {e}",
+                }
+            }
+        except ccxt.InvalidOrder as e:
+            # Invalid order parameters - don't retry
+            self.log_decision(
+                "invalid_order",
+                level="error",
+                symbol=symbol,
+                action=action,
+                error=str(e),
+            )
+            return {
+                "execution": {
+                    "success": False,
+                    "error": f"Invalid order: {e}",
+                }
+            }
+        except ccxt.NetworkError as e:
+            # Network error - retriable but dangerous (order might have been placed)
+            self.log_decision(
+                "exchange_network_error",
+                level="error",
+                symbol=symbol,
+                action=action,
+                error=str(e),
+            )
+            return {
+                "execution": {
+                    "success": False,
+                    "error": f"Network error during order placement: {e}. Check manually!",
+                }
+            }
+        except TradingBotError:
+            # Our own exceptions - re-raise
+            raise
+        except Exception as e:
+            # Unexpected errors - log with traceback and fail
+            self.log_decision(
+                "unexpected_execution_error",
+                level="critical",
+                symbol=symbol,
+                action=action,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            return {
+                "execution": {
+                    "success": False,
+                    "error": f"Unexpected error: {e}",
                 }
             }

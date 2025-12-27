@@ -10,6 +10,11 @@ import numpy as np
 import os
 
 from .base_agent import BaseAgent
+from ..exceptions import (
+    ModelPredictionError,
+    InvalidIndicatorDataError,
+    TradingBotError,
+)
 
 
 class PredictAgent(BaseAgent):
@@ -104,18 +109,36 @@ class PredictAgent(BaseAgent):
                 indicators['bollinger']['lower'],
                 0.0  # Price returns placeholder (calculate if needed)
             ]])
-        except (KeyError, TypeError) as e:
-            self.logger.error(f"Feature extraction failed: {e}")
-            return {
-                "ml_prediction": {
-                    "direction": "neutral",
-                    "confidence": 0.0,
-                    "reason": f"Feature extraction error: {e}",
-                }
-            }
+        except KeyError as e:
+            # Missing indicator field - data structure issue
+            self.log_decision(
+                "feature_extraction_failed",
+                level="error",
+                missing_field=str(e),
+            )
+            raise InvalidIndicatorDataError(f"Missing required indicator field: {e}")
+        except (TypeError, ValueError) as e:
+            # Invalid data type - data quality issue
+            self.log_decision(
+                "invalid_indicator_data",
+                level="error",
+                error=str(e),
+            )
+            raise InvalidIndicatorDataError(f"Invalid indicator data type: {e}")
 
         # Predict probability of price going up
-        prob_up = self.model.predict(features, num_iteration=self.model.best_iteration)[0]
+        try:
+            prob_up = self.model.predict(features, num_iteration=self.model.best_iteration)[0]
+        except Exception as e:
+            # Model prediction failure - ML error
+            self.log_decision(
+                "model_prediction_failed",
+                level="critical",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            raise ModelPredictionError(f"ML model prediction failed: {e}")
 
         # Convert to direction and confidence
         # prob_up in [0, 1], where >0.5 means price will go up

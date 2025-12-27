@@ -13,6 +13,14 @@ from .state import TradingState
 from .providers.factory import create_provider
 from .providers.base import BaseExchangeProvider
 from .logging_config import get_logger, DecisionContext
+from .exceptions import (
+    AgentError,
+    APIError,
+    RiskViolationError,
+    StateError,
+    ConfigurationError,
+    TradingBotError,
+)
 
 # Import all 8 agents
 from .agents.data_sync import DataSyncAgent
@@ -87,10 +95,24 @@ class TradingManager:
         try:
             self.provider: BaseExchangeProvider = create_provider(self.config)
             self.logger.info(
-                f"Trading manager initialized with {self.provider.get_provider_name()}"
+                "provider_initialized",
+                extra={"provider": self.provider.get_provider_name()}
             )
+        except (ConfigurationError, ValueError) as e:
+            # Configuration errors - fatal, can't proceed
+            self.logger.error(
+                "provider_initialization_failed",
+                extra={"error": str(e), "provider": self.config.provider},
+            )
+            self.enabled = False
+            return
         except Exception as e:
-            self.logger.error(f"Failed to initialize provider: {e}")
+            # Unexpected errors - log with traceback
+            self.logger.critical(
+                "provider_initialization_unexpected_error",
+                extra={"error": str(e), "error_type": type(e).__name__},
+                exc_info=True,
+            )
             self.enabled = False
             return
 
@@ -294,24 +316,106 @@ class TradingManager:
                     "error": execution.get("error"),
                 }
 
-        except Exception as e:
+        except AgentError as e:
+            # Agent execution failures - log and skip this iteration
             self.logger.error(
-                "trading_loop_error",
+                "agent_execution_failed",
                 extra={
                     **DecisionContext.get_extra(),
                     "error": str(e),
                     "error_type": type(e).__name__,
                 },
-                exc_info=True
             )
-
-            # Clear decision context
             DecisionContext.clear()
-
+            return {
+                "success": False,
+                "action": "hold",
+                "error": f"Agent error: {e}",
+            }
+        except APIError as e:
+            # API errors - log and retry next iteration
+            self.logger.warning(
+                "api_error_in_trading_loop",
+                extra={
+                    **DecisionContext.get_extra(),
+                    "error": str(e),
+                },
+            )
+            DecisionContext.clear()
+            return {
+                "success": False,
+                "action": "hold",
+                "error": f"API error: {e}",
+            }
+        except RiskViolationError as e:
+            # Risk veto - log and continue (trade rejected)
+            self.logger.info(
+                "risk_veto_in_trading_loop",
+                extra={
+                    **DecisionContext.get_extra(),
+                    "reason": str(e),
+                },
+            )
+            DecisionContext.clear()
+            return {
+                "success": False,
+                "action": "hold",
+                "veto": True,
+                "veto_reason": str(e),
+            }
+        except StateError as e:
+            # State errors - critical, might need to stop
+            self.logger.critical(
+                "state_error_in_trading_loop",
+                extra={
+                    **DecisionContext.get_extra(),
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+            # Try to save current state before continuing
+            try:
+                self.state.save(self.spec_dir)
+            except Exception:
+                pass  # Best effort
+            DecisionContext.clear()
+            return {
+                "success": False,
+                "action": "hold",
+                "error": f"State error: {e}",
+            }
+        except TradingBotError as e:
+            # Known errors - log and continue
+            self.logger.error(
+                "trading_error",
+                extra={
+                    **DecisionContext.get_extra(),
+                    "error_type": type(e).__name__,
+                    "message": str(e),
+                },
+            )
+            DecisionContext.clear()
             return {
                 "success": False,
                 "action": "hold",
                 "error": str(e),
+            }
+        except Exception as e:
+            # Unexpected errors - log with traceback, continue with caution
+            self.logger.critical(
+                "unexpected_trading_error",
+                extra={
+                    **DecisionContext.get_extra(),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
+            DecisionContext.clear()
+            return {
+                "success": False,
+                "action": "hold",
+                "error": f"Unexpected error: {e}",
             }
 
     async def get_positions(self) -> list[dict]:
@@ -341,8 +445,18 @@ class TradingManager:
                 }
                 for pos in positions
             ]
+        except APIError as e:
+            self.logger.error(
+                "fetch_positions_failed",
+                extra={"error": str(e)},
+            )
+            return []
         except Exception as e:
-            self.logger.error(f"Failed to fetch positions: {e}")
+            self.logger.critical(
+                "fetch_positions_unexpected_error",
+                extra={"error": str(e), "error_type": type(e).__name__},
+                exc_info=True,
+            )
             return []
 
     async def get_balance(self) -> Optional[dict]:
@@ -367,8 +481,18 @@ class TradingManager:
                 "used": balance.used,
                 "total": balance.total,
             }
+        except APIError as e:
+            self.logger.error(
+                "fetch_balance_failed",
+                extra={"error": str(e)},
+            )
+            return None
         except Exception as e:
-            self.logger.error(f"Failed to fetch balance: {e}")
+            self.logger.critical(
+                "fetch_balance_unexpected_error",
+                extra={"error": str(e), "error_type": type(e).__name__},
+                exc_info=True,
+            )
             return None
 
     def reset_circuit_breaker(self) -> None:

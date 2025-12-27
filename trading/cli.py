@@ -22,6 +22,14 @@ from integrations.trading.validation import (
     validate_limit,
     ValidationError
 )
+from integrations.trading.exceptions import (
+    ConfigurationError,
+    StateError,
+    TradingBotError,
+)
+from integrations.trading.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def json_output(data: dict):
@@ -64,8 +72,22 @@ async def cmd_status():
             "state": state_data,
         })
 
-    except Exception as e:
+    except ConfigurationError as e:
+        logger.error("cli_configuration_error", extra={"command": "status", "error": str(e)})
+        json_output({"success": False, "error": f"Configuration error: {e}"})
+        sys.exit(1)
+    except StateError as e:
+        logger.error("cli_state_error", extra={"command": "status", "error": str(e)})
+        json_output({"success": False, "error": f"State error: {e}"})
+        sys.exit(1)
+    except TradingBotError as e:
+        logger.error("cli_command_failed", extra={"command": "status", "error": str(e)})
         json_output({"success": False, "error": str(e)})
+        sys.exit(1)
+    except Exception as e:
+        logger.critical("cli_unexpected_error", extra={"command": "status", "error": str(e)}, exc_info=True)
+        json_output({"success": False, "error": f"Unexpected error: {e}"})
+        sys.exit(1)
 
 
 async def cmd_positions():
@@ -110,8 +132,14 @@ async def cmd_positions():
         finally:
             await provider.close()
 
-    except Exception as e:
+    except TradingBotError as e:
+        logger.error("cli_command_failed", extra={"command": "positions", "error": str(e)})
         json_output({"success": False, "error": str(e)})
+        sys.exit(1)
+    except Exception as e:
+        logger.critical("cli_unexpected_error", extra={"command": "positions", "error": str(e)}, exc_info=True)
+        json_output({"success": False, "error": f"Unexpected error: {e}"})
+        sys.exit(1)
 
 
 async def cmd_run(args):

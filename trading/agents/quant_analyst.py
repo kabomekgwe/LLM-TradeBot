@@ -9,6 +9,11 @@ import talib
 from typing import Any
 
 from .base_agent import BaseAgent
+from ..exceptions import (
+    InvalidIndicatorDataError,
+    InsufficientMarketDataError,
+    TradingBotError,
+)
 
 
 class QuantAnalystAgent(BaseAgent):
@@ -47,57 +52,115 @@ class QuantAnalystAgent(BaseAgent):
         # Get 1h candles for analysis (TA-Lib indicators work better on higher timeframes)
         candles_1h = market_data.get("1h", [])
         if len(candles_1h) < 26:  # MACD needs 26 periods minimum
-            self.log_decision("Insufficient data for TA-Lib indicators (need 26+ candles)")
-            return {
-                "quant_signals": {
-                    "error": "Insufficient data for indicators",
-                    "indicators": {},
-                    "overall_signal": "neutral",
-                    "trend": "neutral",
-                    "oscillator": 50,
-                    "sentiment": 0.0,
-                    "regime": "neutral",
-                }
-            }
+            self.log_decision(
+                "insufficient_market_data",
+                level="warning",
+                required=26,
+                got=len(candles_1h),
+            )
+            raise InsufficientMarketDataError(
+                f"Need 26+ candles for TA-Lib indicators, got {len(candles_1h)}"
+            )
 
         # Extract close prices as numpy array (TA-Lib requirement)
-        close_prices = np.array([float(c.close) for c in candles_1h])
+        try:
+            close_prices = np.array([float(c.close) for c in candles_1h])
+        except (AttributeError, ValueError, TypeError) as e:
+            self.log_decision(
+                "invalid_candle_data",
+                level="error",
+                error=str(e),
+            )
+            raise InvalidIndicatorDataError(f"Invalid candle data structure: {e}")
 
-        # Calculate RSI (14-period)
-        rsi = talib.RSI(close_prices, timeperiod=14)
-        rsi_current = rsi[-1] if not np.isnan(rsi[-1]) else 50.0  # Default to neutral if NaN
+        # Validate price data
+        if not all(isinstance(p, (int, float)) and p > 0 for p in close_prices):
+            self.log_decision(
+                "invalid_price_data",
+                level="error",
+                prices=close_prices[:5].tolist(),  # Log first 5 for debugging
+            )
+            raise InvalidIndicatorDataError("Close prices contain invalid values")
+
+        try:
+            # Calculate RSI (14-period)
+            rsi = talib.RSI(close_prices, timeperiod=14)
+            if rsi is None or len(rsi) == 0:
+                raise InvalidIndicatorDataError("RSI calculation returned empty result")
+            rsi_current = rsi[-1] if not np.isnan(rsi[-1]) else 50.0  # Default to neutral if NaN
+        except Exception as e:
+            if isinstance(e, TradingBotError):
+                raise
+            self.log_decision(
+                "rsi_calculation_failed",
+                level="error",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            raise InvalidIndicatorDataError(f"RSI calculation failed: {e}")
 
         # Determine RSI signal
         rsi_signal = 'overbought' if rsi_current > 70 else 'oversold' if rsi_current < 30 else 'neutral'
 
-        # Calculate MACD (12, 26, 9)
-        macd, macdsignal, macdhist = talib.MACD(
-            close_prices,
-            fastperiod=12,
-            slowperiod=26,
-            signalperiod=9
-        )
+        try:
+            # Calculate MACD (12, 26, 9)
+            macd, macdsignal, macdhist = talib.MACD(
+                close_prices,
+                fastperiod=12,
+                slowperiod=26,
+                signalperiod=9
+            )
 
-        macd_current = macd[-1] if not np.isnan(macd[-1]) else 0.0
-        signal_current = macdsignal[-1] if not np.isnan(macdsignal[-1]) else 0.0
-        hist_current = macdhist[-1] if not np.isnan(macdhist[-1]) else 0.0
+            if macd is None or macdsignal is None or macdhist is None:
+                raise InvalidIndicatorDataError("MACD calculation returned None")
 
-        # Determine MACD trend
-        macd_signal = 'bullish' if macd_current > signal_current else 'bearish'
+            macd_current = macd[-1] if not np.isnan(macd[-1]) else 0.0
+            signal_current = macdsignal[-1] if not np.isnan(macdsignal[-1]) else 0.0
+            hist_current = macdhist[-1] if not np.isnan(macdhist[-1]) else 0.0
 
-        # Calculate Bollinger Bands (20-period, 2 std dev)
-        upperband, middleband, lowerband = talib.BBANDS(
-            close_prices,
-            timeperiod=20,
-            nbdevup=2,
-            nbdevdn=2,
-            matype=0  # SMA
-        )
+            # Determine MACD trend
+            macd_signal = 'bullish' if macd_current > signal_current else 'bearish'
+        except Exception as e:
+            if isinstance(e, TradingBotError):
+                raise
+            self.log_decision(
+                "macd_calculation_failed",
+                level="error",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            raise InvalidIndicatorDataError(f"MACD calculation failed: {e}")
 
-        upper = upperband[-1] if not np.isnan(upperband[-1]) else close_prices[-1]
-        middle = middleband[-1] if not np.isnan(middleband[-1]) else close_prices[-1]
-        lower = lowerband[-1] if not np.isnan(lowerband[-1]) else close_prices[-1]
-        current_price = close_prices[-1]
+        try:
+            # Calculate Bollinger Bands (20-period, 2 std dev)
+            upperband, middleband, lowerband = talib.BBANDS(
+                close_prices,
+                timeperiod=20,
+                nbdevup=2,
+                nbdevdn=2,
+                matype=0  # SMA
+            )
+
+            if upperband is None or middleband is None or lowerband is None:
+                raise InvalidIndicatorDataError("Bollinger Bands calculation returned None")
+
+            upper = upperband[-1] if not np.isnan(upperband[-1]) else close_prices[-1]
+            middle = middleband[-1] if not np.isnan(middleband[-1]) else close_prices[-1]
+            lower = lowerband[-1] if not np.isnan(lowerband[-1]) else close_prices[-1]
+            current_price = close_prices[-1]
+        except Exception as e:
+            if isinstance(e, TradingBotError):
+                raise
+            self.log_decision(
+                "bollinger_calculation_failed",
+                level="error",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            raise InvalidIndicatorDataError(f"Bollinger Bands calculation failed: {e}")
 
         # Determine Bollinger Band position
         if current_price > middle:

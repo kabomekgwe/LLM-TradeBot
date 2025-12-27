@@ -7,8 +7,17 @@ Responsible for asynchronously fetching market data across multiple timeframes.
 import asyncio
 from typing import Any
 
+import ccxt
+
 from .base_agent import BaseAgent
 from ..logging_config import DecisionContext
+from ..exceptions import (
+    ExchangeConnectionError,
+    RateLimitExceededError,
+    InvalidSymbolError,
+    AgentTimeoutError,
+    TradingBotError,
+)
 
 
 class DataSyncAgent(BaseAgent):
@@ -104,20 +113,52 @@ class DataSyncAgent(BaseAgent):
             return {"market_data": market_data}
 
         except asyncio.TimeoutError:
+            # Timeout from asyncio.wait_for - convert to our exception
             self.log_decision(
                 "data_fetch_timeout",
                 level="error",
                 symbol=symbol,
                 timeout_seconds=30,
             )
-            raise
-        except Exception as e:
+            raise AgentTimeoutError(f"Timeout fetching market data for {symbol}")
+        except ccxt.NetworkError as e:
+            # Network errors - retriable
             self.log_decision(
-                "data_fetch_failed",
+                "exchange_network_error",
                 level="error",
                 symbol=symbol,
                 error=str(e),
+            )
+            raise ExchangeConnectionError(f"Network error fetching {symbol}: {e}")
+        except ccxt.RateLimitExceeded as e:
+            # Rate limit - should back off
+            self.log_decision(
+                "rate_limit_exceeded",
+                level="warning",
+                symbol=symbol,
+                retry_after=getattr(e, "retry_after", None),
+            )
+            raise RateLimitExceededError(f"Rate limit exceeded for {symbol}")
+        except ccxt.BadSymbol as e:
+            # Invalid symbol - don't retry
+            self.log_decision(
+                "invalid_symbol",
+                level="error",
+                symbol=symbol,
+            )
+            raise InvalidSymbolError(f"Symbol {symbol} not supported: {e}")
+        except TradingBotError:
+            # Our own exceptions - re-raise
+            raise
+        except Exception as e:
+            # Truly unexpected errors - log with full traceback
+            self.log_decision(
+                "unexpected_data_sync_error",
+                level="critical",
+                symbol=symbol,
+                error=str(e),
                 error_type=type(e).__name__,
+                exc_info=True,
             )
             raise
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from .logging_config import get_logger
+from .exceptions import StateSaveFailedError, StateCorruptedError, StateLoadFailedError
 
 logger = get_logger(__name__)
 
@@ -87,13 +88,40 @@ class TradingState:
             # On Windows: Python 3.3+ os.replace() handles this correctly
             os.replace(temp_path, str(state_file))
 
-        except Exception as e:
+            logger.debug(
+                "state_saved",
+                extra={
+                    "file": str(state_file),
+                    "size_bytes": os.path.getsize(str(state_file)),
+                },
+            )
+
+        except (IOError, OSError) as e:
             # Clean up temp file on error
             try:
                 os.unlink(temp_path)
             except OSError:
                 pass  # Temp file already deleted or inaccessible
-            raise  # Re-raise original exception
+
+            logger.error(
+                "state_save_io_error",
+                extra={"error": str(e), "state_file": str(state_file)},
+                exc_info=True,
+            )
+            raise StateSaveFailedError(f"Failed to save state: {e}")
+        except Exception as e:
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+            logger.critical(
+                "state_save_unexpected_error",
+                extra={"error": str(e), "error_type": type(e).__name__},
+                exc_info=True,
+            )
+            raise StateSaveFailedError(f"Unexpected error saving state: {e}")
 
     @classmethod
     def load(cls, spec_dir: Path) -> Optional["TradingState"]:
@@ -119,19 +147,43 @@ class TradingState:
             with open(state_file) as f:
                 state_dict = json.load(f)
 
+            # Validate required fields
+            required = ["initialized", "total_trades"]
+            missing = [field for field in required if field not in state_dict]
+            if missing:
+                raise StateCorruptedError(f"Missing required fields: {missing}")
+
+            logger.debug(
+                "state_loaded",
+                extra={"file": str(state_file)},
+            )
             return cls.from_dict(state_dict)
 
-        except (OSError, json.JSONDecodeError) as e:
-            # Log error but return None for graceful degradation
-            logger.warning(
-                "state_load_failed",
-                extra={
-                    "state_file": str(state_file),
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
+        except FileNotFoundError:
+            logger.info(
+                "state_not_found",
+                extra={"file": str(state_file)},
             )
             return None
+        except json.JSONDecodeError as e:
+            logger.error(
+                "state_corrupted_json",
+                extra={
+                    "file": str(state_file),
+                    "error": str(e),
+                },
+            )
+            raise StateCorruptedError(f"State file corrupted (invalid JSON): {e}")
+        except StateCorruptedError:
+            # Re-raise our exception
+            raise
+        except Exception as e:
+            logger.critical(
+                "state_load_unexpected_error",
+                extra={"error": str(e), "error_type": type(e).__name__},
+                exc_info=True,
+            )
+            raise StateLoadFailedError(f"Unexpected error loading state: {e}")
 
     @classmethod
     def from_dict(cls, data: dict) -> "TradingState":
