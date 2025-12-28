@@ -25,6 +25,7 @@ from ..safety.kill_switch import KillSwitch
 from ..monitoring.metrics_tracker import MetricsTracker
 from ..monitoring.system_health import SystemHealthMonitor
 from ..monitoring.alert_manager import AlertManager
+from ..api.ml_serving import router as ml_router
 
 
 class DashboardServer:
@@ -97,6 +98,9 @@ class DashboardServer:
         # Server task
         self._server_task: Optional[asyncio.Task] = None
         self._server = None
+
+        # Register ML serving router
+        self.app.include_router(ml_router)
 
         # Setup routes
         self._setup_routes()

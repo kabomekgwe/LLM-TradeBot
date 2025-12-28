@@ -116,23 +116,45 @@ class TradeRecord:
 
 
 class TradeJournal:
-    """File-based trade journal for persistent storage.
+    """Hybrid trade journal with database and file-based storage.
 
-    Stores trades as human-readable JSON files in spec's memory directory.
+    Stores trades in PostgreSQL database with TimescaleDB optimization.
+    Falls back to file-based storage if database is unavailable.
     """
 
-    def __init__(self, spec_dir: Path):
+    def __init__(self, spec_dir: Path, use_database: bool = True):
         """Initialize trade journal.
 
         Args:
             spec_dir: Spec directory (e.g., specs/001-feature/)
+            use_database: Try to use database if available (default: True)
         """
         self.spec_dir = spec_dir
         self.memory_dir = spec_dir / "memory" / "trades"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
 
-        # Index file for quick lookups
+        # Database connection (with fallback)
+        self.use_database = use_database
+        self.db = None
+        self.repo = None
+
+        if use_database:
+            try:
+                from ..database.connection import get_db
+                from ..database.repositories import TradeRepository
+
+                self.db = next(get_db())
+                self.repo = TradeRepository(self.db)
+                self.logger.info("TradeJournal using database storage")
+            except Exception as e:
+                self.logger.warning(f"Database unavailable, falling back to file storage: {e}")
+                self.use_database = False
+
+        if not self.use_database:
+            self.logger.info("TradeJournal using file-based storage")
+
+        # Index file for file-based storage
         self.index_file = self.memory_dir / "index.json"
         self.index = self._load_index()
 
@@ -155,19 +177,33 @@ class TradeJournal:
             self.logger.error(f"Failed to save trade index: {e}")
 
     def log_trade(self, trade: TradeRecord):
-        """Log a trade to the journal.
+        """Log a trade to the journal (database or file).
 
         Args:
             trade: Trade record to log
         """
-        # Generate filename from timestamp and trade_id
+        if self.use_database and self.repo:
+            try:
+                # Convert timestamp from milliseconds to datetime
+                trade_data = trade.to_dict()
+                trade_data['timestamp'] = datetime.fromtimestamp(trade.timestamp / 1000)
+                if trade.close_timestamp:
+                    trade_data['close_timestamp'] = datetime.fromtimestamp(trade.close_timestamp / 1000)
+
+                self.repo.create_trade(trade_data)
+                self.logger.info(f"Trade logged to database: {trade.trade_id} ({trade.symbol})")
+                return
+            except Exception as e:
+                self.logger.error(f"Failed to log trade to database: {e}, falling back to file")
+                self.use_database = False  # Disable database for future calls
+
+        # File-based fallback
         timestamp_str = datetime.fromtimestamp(trade.timestamp / 1000).strftime(
             "%Y%m%d_%H%M%S"
         )
         filename = f"{timestamp_str}_{trade.trade_id}.json"
         filepath = self.memory_dir / filename
 
-        # Save trade record
         try:
             with open(filepath, "w") as f:
                 json.dump(trade.to_dict(), f, indent=2)
@@ -176,10 +212,10 @@ class TradeJournal:
             self.index[trade.trade_id] = filename
             self._save_index()
 
-            self.logger.info(f"Trade logged: {trade.trade_id} ({trade.symbol})")
+            self.logger.info(f"Trade logged to file: {trade.trade_id} ({trade.symbol})")
 
         except Exception as e:
-            self.logger.error(f"Failed to log trade: {e}")
+            self.logger.error(f"Failed to log trade to file: {e}")
 
     def get_trade(self, trade_id: str) -> Optional[TradeRecord]:
         """Get a specific trade by ID.

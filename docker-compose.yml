@@ -166,35 +166,37 @@ services:
       - tradebot-network
 
   # ============================================================
-  # PostgreSQL Database (Optional - Phase 12)
+  # PostgreSQL + TimescaleDB (Phase 12)
   # ============================================================
-  # Uncomment to enable database for trade history persistence
-  # Currently commented out as Phase 11 doesn't require it
-  # postgres:
-  #   image: postgres:16-alpine
-  #   container_name: llm-tradebot-postgres
-  #
-  #   environment:
-  #     POSTGRES_DB: tradebot
-  #     POSTGRES_USER: tradebot
-  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-  #
-  #   ports:
-  #     - "5432:5432"
-  #
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-  #
-  #   restart: unless-stopped
-  #
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U tradebot"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #
-  #   networks:
-  #     - tradebot-network
+  # TimescaleDB for trade history persistence with time-series optimization
+  postgres:
+    image: timescale/timescaledb:latest-pg17
+    container_name: llm-tradebot-postgres
+
+    environment:
+      POSTGRES_DB: tradingbot
+      POSTGRES_USER: tradingbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      # TimescaleDB auto-tuning
+      TS_TUNE_MEMORY: "2GB"
+      TS_TUNE_NUM_CPUS: "2"
+
+    ports:
+      - "5437:5432"  # Map to 5437 on host to avoid conflicts
+
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradingbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - tradebot-network
 
 # ============================================================
 # Networks
@@ -206,11 +208,6 @@ networks:
 # ============================================================
 # Volumes
 # ============================================================
-# Named volumes for persistent data
-# Uncomment postgres-data when enabling postgres service
-volumes:
-  # postgres-data:
-  #   driver: local
-
-  # Note: models/, data/, logs/ use bind mounts from host
-  # This allows direct access to files for development and debugging
+# Note: PostgreSQL uses bind mount ./db_data for direct access
+# Note: models/, data/, logs/ use bind mounts from host
+# This allows direct access to files for development and debugging
