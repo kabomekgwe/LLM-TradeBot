@@ -5,13 +5,14 @@ Complete guide for deploying LLM-TradeBot to production using Docker and Docker 
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Local Development Deployment](#local-development-deployment)
-3. [Production VPS Deployment](#production-vps-deployment)
-4. [Updating Deployment](#updating-deployment)
-5. [Rollback Procedure](#rollback-procedure)
-6. [Monitoring and Logs](#monitoring-and-logs)
-7. [Troubleshooting](#troubleshooting)
-8. [Security Best Practices](#security-best-practices)
+2. [Docker Secrets Management](#docker-secrets-management)
+3. [Local Development Deployment](#local-development-deployment)
+4. [Production VPS Deployment](#production-vps-deployment)
+5. [Updating Deployment](#updating-deployment)
+6. [Rollback Procedure](#rollback-procedure)
+7. [Monitoring and Logs](#monitoring-and-logs)
+8. [Troubleshooting](#troubleshooting)
+9. [Security Best Practices](#security-best-practices)
 
 ---
 
@@ -57,6 +58,156 @@ Complete guide for deploying LLM-TradeBot to production using Docker and Docker 
   - Telegram bot token and chat ID
   - Email SMTP credentials (Gmail app password)
   - Discord/Slack webhooks
+
+---
+
+## Docker Secrets Management
+
+LLM-TradeBot uses Docker secrets for secure credential management in production. Secrets are mounted at `/run/secrets/<secret_name>` inside containers with 600 permissions, ensuring API keys and passwords are never exposed in environment variables or logs.
+
+### Secrets Overview
+
+The system uses four Docker secrets:
+
+| Secret | Description | Auto-Generated |
+|--------|-------------|----------------|
+| `exchange_api_key` | Exchange API key for trading | No (manual input) |
+| `exchange_api_secret` | Exchange API secret for trading | No (manual input) |
+| `kill_switch_secret` | HMAC secret for kill switch authentication | Yes (32-byte random) |
+| `db_password` | PostgreSQL database password | Yes (32-byte random) |
+
+### Initialize Secrets
+
+Use the initialization script to create secrets with secure permissions:
+
+```bash
+# Run secrets initialization script
+chmod +x scripts/init-secrets.sh
+./scripts/init-secrets.sh
+```
+
+The script will:
+1. Prompt for exchange API credentials (if not already set)
+2. Auto-generate kill switch secret using OpenSSL (if not already set)
+3. Auto-generate database password using OpenSSL (if not already set)
+4. Set file permissions to 600 (owner read/write only)
+5. Display generated secrets for backup
+
+**Example output:**
+```
+=== Docker Secrets Initialization ===
+
+Enter Exchange API Key: your_api_key_here
+✓ Created exchange_api_key
+Enter Exchange API Secret: your_api_secret_here
+✓ Created exchange_api_secret
+✓ Generated kill_switch_secret: Xy7Bq9...
+✓ Generated db_password: Kl3mP8...
+
+=== Secrets initialized successfully ===
+Secret files created in: ./secrets
+File permissions set to 600 (owner read/write only)
+
+IMPORTANT: Never commit secrets/* to version control!
+```
+
+### Secrets Files Location
+
+All secrets are stored in the `./secrets/` directory:
+
+```
+secrets/
+├── .gitkeep                 # Keeps directory in git
+├── exchange_api_key         # Exchange API key (600 permissions)
+├── exchange_api_secret      # Exchange API secret (600 permissions)
+├── kill_switch_secret       # Kill switch HMAC secret (600 permissions)
+└── db_password              # Database password (600 permissions)
+```
+
+**IMPORTANT:** The `secrets/` directory is in `.gitignore` (except `.gitkeep`). Never commit actual secret files to version control.
+
+### Verify Secrets Configuration
+
+After initializing secrets, verify they're properly configured:
+
+```bash
+# Check secret files exist with correct permissions
+ls -lah secrets/
+# Should show 4 files with -rw------- (600) permissions
+
+# Start containers
+docker-compose up -d
+
+# Verify secrets mounted in containers
+docker exec llm-tradebot-trading-bot-1 ls -la /run/secrets/
+# Should show all 4 secrets mounted
+
+# Test secret loading (check logs)
+docker-compose logs trading-bot | grep "Loaded secret"
+# Should show: "Loaded secret from Docker secrets: exchange_api_key"
+
+# Verify secrets not in git
+git status | grep secrets/
+# Should only show secrets/.gitkeep (if directory is tracked)
+```
+
+### Backup Secrets
+
+**CRITICAL:** Backup your secrets securely before production deployment:
+
+```bash
+# Create encrypted backup
+tar -czf secrets-backup-$(date +%Y%m%d).tar.gz secrets/
+gpg -c secrets-backup-$(date +%Y%m%d).tar.gz  # Enter strong passphrase
+rm secrets-backup-$(date +%Y%m%d).tar.gz
+
+# Store encrypted .gpg file in secure location (NOT in git)
+# Store passphrase separately (password manager, offline storage)
+```
+
+### Restore Secrets
+
+To restore secrets on a new server or after data loss:
+
+```bash
+# Decrypt backup
+gpg secrets-backup-YYYYMMDD.tar.gz.gpg
+# Enter passphrase
+
+# Extract secrets
+tar -xzf secrets-backup-YYYYMMDD.tar.gz
+
+# Verify permissions
+chmod 600 secrets/*
+ls -lah secrets/
+```
+
+### Update Secrets
+
+To rotate API keys or update secrets:
+
+```bash
+# Update individual secret file
+echo -n "new_api_key_value" > secrets/exchange_api_key
+chmod 600 secrets/exchange_api_key
+
+# Restart containers to load new secrets
+docker-compose restart trading-bot
+
+# Verify new secret loaded
+docker-compose logs trading-bot | grep "Loaded secret"
+```
+
+### Fallback to Environment Variables
+
+The system supports fallback to `.env` file for local development:
+
+- **Production**: Uses Docker secrets from `/run/secrets/` (recommended)
+- **Development**: Falls back to `.env` file if secrets not available
+
+Priority: Docker secrets > Environment variables
+
+This allows local development without secrets setup while maintaining security in production.
 
 ---
 

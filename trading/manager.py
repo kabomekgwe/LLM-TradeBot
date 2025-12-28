@@ -138,8 +138,10 @@ class TradingManager:
             return
 
         # Initialize safety components
+        from .config.secrets import SecretsManager
         self.thresholds = SafetyThresholds()
-        self.kill_switch = KillSwitch(secret_key=os.getenv("KILL_SWITCH_SECRET", "default-secret-change-me"))
+        kill_switch_secret = SecretsManager.get_kill_switch_secret() or "default-secret-change-me"
+        self.kill_switch = KillSwitch(secret_key=kill_switch_secret)
         self.risk_calculator = RiskCalculator()
         self.trade_journal = TradeJournal(spec_dir / ".trade_journal.db")
         self.circuit_breaker = CircuitBreaker(self.thresholds, self.risk_calculator)

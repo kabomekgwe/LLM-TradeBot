@@ -20,6 +20,7 @@ except ImportError:
     pass  # python-dotenv not installed (production environment)
 
 from .validation import validate_exchange_name, ValidationError
+from .config.secrets import SecretsManager
 
 
 @dataclass
@@ -105,9 +106,10 @@ class TradingConfig:
         # Normalize provider name for env var lookup
         provider_upper = provider.upper().replace("-", "_")
 
-        # Load API credentials from environment (NEVER from code)
-        api_key = os.getenv(f"{provider_upper}_API_KEY", "")
-        api_secret = os.getenv(f"{provider_upper}_API_SECRET", "")
+        # Load API credentials from Docker secrets or environment variables
+        # Priority: Docker secrets > Environment variables
+        api_key = SecretsManager.get_secret("exchange_api_key", f"{provider_upper}_API_KEY") or ""
+        api_secret = SecretsManager.get_secret("exchange_api_secret", f"{provider_upper}_API_SECRET") or ""
 
         # Validate credentials are present (fail-fast for non-paper providers)
         if provider != "paper" and (not api_key or not api_secret):

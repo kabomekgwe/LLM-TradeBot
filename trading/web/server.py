@@ -16,6 +16,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Requ
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
 from ..config import TradingConfig
@@ -26,6 +27,33 @@ from ..monitoring.metrics_tracker import MetricsTracker
 from ..monitoring.system_health import SystemHealthMonitor
 from ..monitoring.alert_manager import AlertManager
 from ..api.ml_serving import router as ml_router
+from ..logging.log_context import LogContext
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Add unique request ID to each API request for correlation tracking."""
+
+    async def dispatch(self, request, call_next):
+        """Add correlation ID to request context and response headers.
+
+        Args:
+            request: Incoming HTTP request
+            call_next: Next middleware in chain
+
+        Returns:
+            Response with X-Request-ID header
+        """
+        # Generate correlation ID for this request
+        correlation_id = LogContext.generate_correlation_id()
+        LogContext.set_correlation_id(correlation_id)
+
+        # Process request
+        response = await call_next(request)
+
+        # Add to response headers for debugging
+        response.headers["X-Request-ID"] = correlation_id
+
+        return response
 
 
 class DashboardServer:
@@ -94,6 +122,9 @@ class DashboardServer:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+        # Request ID middleware for correlation tracking
+        self.app.add_middleware(RequestIDMiddleware)
 
         # Server task
         self._server_task: Optional[asyncio.Task] = None

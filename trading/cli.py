@@ -98,11 +98,13 @@ async def cmd_safety_status():
         from trading.safety.circuit_breaker import CircuitBreaker, CircuitState
         from trading.safety.position_limits import PositionLimitEnforcer
         from trading.analytics.risk_calculator import RiskCalculator
+        from trading.config.secrets import SecretsManager
         import os
 
         # Initialize safety components (read-only status check)
         thresholds = SafetyThresholds()
-        kill_switch = KillSwitch(secret_key=os.getenv("KILL_SWITCH_SECRET", "default"))
+        kill_switch_secret = SecretsManager.get_kill_switch_secret() or "default"
+        kill_switch = KillSwitch(secret_key=kill_switch_secret)
         risk_calculator = RiskCalculator()
         circuit_breaker = CircuitBreaker(thresholds, risk_calculator)
         position_limits = PositionLimitEnforcer(thresholds)
@@ -395,6 +397,20 @@ async def cmd_insights():
 
 def main():
     """Main CLI entry point."""
+    import os
+    import logging
+    from .logging.json_logger import setup_json_logging
+    from .logging.log_context import CorrelationFilter
+
+    # Initialize structured JSON logging
+    log_level = os.getenv('LOG_LEVEL', 'INFO')
+    setup_json_logging(log_level)
+
+    # Add correlation filter to all loggers
+    correlation_filter = CorrelationFilter()
+    for handler in logging.root.handlers:
+        handler.addFilter(correlation_filter)
+
     parser = argparse.ArgumentParser(
         description="Trading integration CLI for IPC"
     )

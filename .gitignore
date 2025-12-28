@@ -9,7 +9,8 @@
 *.key
 *.p12
 credentials.json
-secrets/
+secrets/*
+!secrets/.gitkeep
 
 # Python
 __pycache__/

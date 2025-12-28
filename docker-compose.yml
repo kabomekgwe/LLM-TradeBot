@@ -14,6 +14,21 @@ version: '3.8'
 #   Logs:        docker-compose logs -f trading-bot
 #   Stop:        docker-compose down
 
+# ============================================================
+# Docker Secrets Configuration
+# ============================================================
+# Secrets are mounted at /run/secrets/<secret_name> in containers
+# Initialize secrets using: ./scripts/init-secrets.sh
+secrets:
+  exchange_api_key:
+    file: ./secrets/exchange_api_key
+  exchange_api_secret:
+    file: ./secrets/exchange_api_secret
+  kill_switch_secret:
+    file: ./secrets/kill_switch_secret
+  db_password:
+    file: ./secrets/db_password
+
 services:
   # ============================================================
   # Dashboard Service
@@ -26,6 +41,11 @@ services:
       dockerfile: Dockerfile
     container_name: llm-tradebot-dashboard
     command: python -m trading.web.server
+
+    # Docker secrets
+    secrets:
+      - kill_switch_secret
+      - db_password
 
     # Environment variables
     env_file:
@@ -103,6 +123,13 @@ services:
     container_name: llm-tradebot-trading
     command: python -m trading.cli run --symbol ${TRADING_SYMBOL:-BTC/USDT}
 
+    # Docker secrets
+    secrets:
+      - exchange_api_key
+      - exchange_api_secret
+      - kill_switch_secret
+      - db_password
+
     # Environment variables
     env_file:
       - .env
@@ -173,10 +200,14 @@ services:
     image: timescale/timescaledb:latest-pg17
     container_name: llm-tradebot-postgres
 
+    # Docker secrets
+    secrets:
+      - db_password
+
     environment:
       POSTGRES_DB: tradingbot
       POSTGRES_USER: tradingbot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       # TimescaleDB auto-tuning
       TS_TUNE_MEMORY: "2GB"
       TS_TUNE_NUM_CPUS: "2"
