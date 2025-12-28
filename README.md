@@ -1,12 +1,31 @@
 # LLM-TradeBot 🤖📈
 
+**Production-ready autonomous cryptocurrency trading bot powered by LLM agents, ensemble ML models, and real-time risk management**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Docker](https://img.shields.io/badge/docker-ready-brightgreen.svg)](https://www.docker.com/)
+
+> **⚡ Quick Start:** See [TUTORIAL.md](TUTORIAL.md) for a complete step-by-step guide
+
 Multi-platform algorithmic trading system powered by an 8-agent adversarial decision framework.
 
-## Quick Start with Docker
+## 📚 Documentation
+
+- **[TUTORIAL.md](TUTORIAL.md)** - Complete step-by-step guide (START HERE!)
+- **[DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Production deployment guide
+- **[PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md)** - Pre-deployment checklist
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and architecture
+
+## ⚡ Quick Start with Docker
 
 The fastest way to get started is using Docker:
 
 ```bash
+# Clone repository
+git clone https://github.com/kabomekgwe/LLM-TradeBot.git
+cd LLM-TradeBot
+
 # Copy environment template
 cp .env.production.template .env
 
@@ -23,20 +42,44 @@ docker-compose logs -f
 open http://localhost:5173
 ```
 
-For detailed deployment instructions, see [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+**👉 For detailed instructions, see [TUTORIAL.md](TUTORIAL.md)**
 
-## Features
+## ✨ Key Features
 
-- **8-Agent Adversarial System**: Bull vs Bear agents with regime-aware decision making
-- **Multi-Platform Support**: Trade on 6 different platforms
-  - Binance Futures & Spot
-  - Kraken
-  - Coinbase Advanced Trade
-  - Alpaca (US Stocks)
-  - Paper Trading (No API keys needed)
-- **Intelligent Learning**: Trade journaling with pattern detection
-- **Risk Management**: Circuit breakers, position limits, veto power
-- **Market Regime Detection**: Adapts strategy to trending/choppy/volatile markets
+### 🤖 LLM-Powered Trading Agents
+- **Bull & Bear Consensus** - Adversarial agents analyze markets from opposing perspectives
+- **GPT-4 Integration** - Advanced reasoning for market analysis
+- **Regime-Aware Decisions** - Adapts to trending, choppy, and volatile markets
+
+### 🧠 Ensemble ML Models
+- **XGBoost & LightGBM** - Gradient boosting for price predictions
+- **LSTM Networks** - Deep learning for sequential pattern recognition
+- **Transformer Models** - Attention mechanisms for market analysis
+- **86 Technical Indicators** - Comprehensive feature engineering
+
+### 🛡️ Production-Grade Safety
+- **Kill Switch API** - Emergency stop with HMAC authentication
+- **Circuit Breaker** - Automatic trading halt on losses
+- **4-Layer Position Limits** - Per-symbol, per-strategy, portfolio, and max positions
+- **Real-time Monitoring** - Sharpe ratio, drawdown, P&L tracking
+
+### 📊 Real-Time Dashboard
+- **Live Metrics** - Performance, risk, and health monitoring
+- **Multi-Channel Alerts** - Slack, Email, Telegram notifications
+- **Trade History** - TimescaleDB with time-series optimization
+- **WebSocket Updates** - Real-time data streaming
+
+### 🐳 Docker Deployment
+- **Multi-Stage Builds** - Optimized image size (<1GB)
+- **Health Checks** - Automatic container restart on failures
+- **Graceful Shutdown** - Safe position closure on stop
+- **Docker Secrets** - Secure API key management
+
+### 🔐 Security & Observability
+- **Structured JSON Logging** - Queryable logs with correlation IDs
+- **Docker Secrets** - Production-grade secrets management
+- **Request Tracing** - X-Request-ID headers for debugging
+- **Compliance Ready** - Audit trail and trade history persistence
 
 ## Quick Start
 
@@ -341,12 +384,40 @@ Contributions welcome! Please read CONTRIBUTING.md first.
 
 **This software is for educational purposes only. Trading cryptocurrencies and stocks involves substantial risk of loss. Past performance does not guarantee future results. Use at your own risk.**
 
-## Support
+## 📖 Learning Resources
 
-- Documentation: `docs/`
-- Issues: GitHub Issues
-- Examples: `examples/`
+- **[TUTORIAL.md](TUTORIAL.md)** - Complete beginner-friendly guide
+- **Architecture Overview** - See [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Examples** - Check `examples/` directory
+- **API Documentation** - See `docs/API.md`
+
+## 🤝 Support
+
+- **Documentation**: `docs/` directory
+- **Issues**: [GitHub Issues](https://github.com/kabomekgwe/LLM-TradeBot/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/kabomekgwe/LLM-TradeBot/discussions)
+
+## 🗺️ Roadmap
+
+- [x] Phase 9: Emergency Safety Controls ✅
+- [x] Phase 10: Real-Time Monitoring Infrastructure ✅
+- [x] Phase 11: Dockerized Production Deployment ✅
+- [x] Phase 12: Model Serving & Data Infrastructure ✅
+- [ ] Phase 13: Advanced ML (Model versioning, A/B testing)
+- [ ] Phase 14: Portfolio Optimization
+- [ ] Phase 15: Multi-Exchange Arbitrage
+
+See [.planning/ROADMAP.md](.planning/ROADMAP.md) for full roadmap.
+
+## 🙏 Acknowledgments
+
+- Built with [Claude Code](https://claude.com/claude-code)
+- Powered by [OpenAI GPT-4](https://openai.com)
+- Exchange integration via [CCXT](https://github.com/ccxt/ccxt)
+- Time-series database: [TimescaleDB](https://www.timescale.com)
 
 ---
 
-Built with ❤️ using Claude AI
+**⭐ Star this repo if you find it useful!**
+
+Built with ❤️ using Claude Code
