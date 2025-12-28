@@ -75,19 +75,20 @@ Plans:
 
 **Depends on**: Phase 11
 
-**Research**: Likely (model serving frameworks, time-series database, secrets management)
+**Research**: Completed (Level 1-2 - Quick Verification to Standard Research)
 
-**Research topics**:
-- PyTorch model serving options (TorchServe, FastAPI custom, ONNX Runtime)
-- PostgreSQL vs TimescaleDB for trade history (time-series optimization, retention policies)
-- Secrets management solutions (HashiCorp Vault, AWS Secrets Manager, Docker secrets)
-- Centralized logging patterns (ELK stack, Grafana Loki, CloudWatch)
-- Database migration strategies (Alembic, manual scripts)
+**Research findings**:
+- TimescaleDB: Official Docker image `timescale/timescaledb:latest-pg17` with auto-tuning via `timescaledb-tune`
+- Model serving: FastAPI+Uvicorn with Redis caching preferred over TorchServe for moderate concurrency
+- Secrets management: Docker secrets (native integration with Phase 11 infrastructure)
+- Logging: `python-json-logger` (already in requirements.txt) for structured JSON logs
+- Database: SQLAlchemy ORM with Alembic migrations for schema management
 
-**Plans**: TBD
+**Plans**: 2/2 created, 1/2 complete
 
 Plans:
-- [ ] 12-01: TBD
+- [x] 12-01: Database Infrastructure & Model Serving ✅ (PostgreSQL + TimescaleDB, FastAPI endpoints, 4 tasks)
+- [ ] 12-02: Secrets Management & Structured Logging (Docker secrets, JSON logging, 3 tasks)
 
 ---
 
