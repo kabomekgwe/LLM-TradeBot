@@ -1,0 +1,216 @@
+version: '3.8'
+
+# LLM-TradeBot Docker Compose Configuration
+# Multi-service orchestration for production deployment
+#
+# Services:
+# - dashboard: Web dashboard server (FastAPI + WebSocket)
+# - trading-bot: Main trading engine (8-agent system)
+# - postgres: Optional database for trade history (Phase 12)
+#
+# Usage:
+#   Development: docker-compose up -d
+#   Production:  docker-compose -f docker-compose.yml up -d
+#   Logs:        docker-compose logs -f trading-bot
+#   Stop:        docker-compose down
+
+services:
+  # ============================================================
+  # Dashboard Service
+  # ============================================================
+  # Web dashboard for real-time monitoring and control
+  # Provides REST API and WebSocket endpoints
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-tradebot-dashboard
+    command: python -m trading.web.server
+
+    # Environment variables
+    env_file:
+      - .env
+    environment:
+      # Dashboard configuration
+      DASHBOARD_ENABLED: "true"
+      DASHBOARD_HOST: "0.0.0.0"  # Bind to all interfaces for container access
+      DASHBOARD_PORT: "5173"
+
+      # Logging
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+
+    # Port mapping
+    # Dashboard accessible at http://localhost:5173
+    ports:
+      - "5173:5173"
+
+    # Volume mounts
+    volumes:
+      # Persistent data directories
+      - ./models:/app/models          # ML model files (.pth, .pkl)
+      - ./data:/app/data              # Trade history, logs, state files
+      - ./logs:/app/logs              # Application logs
+
+      # Environment file (read-only)
+      - ./.env:/app/.env:ro
+
+      # Optional: Mount source code for development hot-reload
+      # Uncomment for development, remove for production
+      # - ./trading:/app/trading:ro
+
+    # Restart policy
+    # unless-stopped: Always restart unless manually stopped
+    restart: unless-stopped
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s  # Allow 30s for dashboard startup
+
+    # Resource limits (optional, uncomment for production)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 1G
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network configuration
+    networks:
+      - tradebot-network
+
+  # ============================================================
+  # Trading Bot Service
+  # ============================================================
+  # Main trading engine with 8-agent system
+  # Depends on dashboard for health check integration
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-tradebot-trading
+    command: python -m trading.cli run --symbol ${TRADING_SYMBOL:-BTC/USDT}
+
+    # Environment variables
+    env_file:
+      - .env
+    environment:
+      # Trading configuration
+      TRADING_PROVIDER: "${TRADING_PROVIDER:-paper}"
+      TRADING_TESTNET: "${TRADING_TESTNET:-true}"
+
+      # Dashboard connection
+      DASHBOARD_ENABLED: "true"
+      DASHBOARD_HOST: "dashboard"  # Connect to dashboard service
+      DASHBOARD_PORT: "5173"
+
+      # Logging
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+
+    # Volume mounts (same as dashboard for shared data)
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+      # - ./trading:/app/trading:ro  # Uncomment for development
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Health check
+    # Checks dashboard service health endpoint
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://dashboard:5173/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Allow 60s for model loading
+
+    # Depends on dashboard service
+    depends_on:
+      dashboard:
+        condition: service_healthy
+
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2.0'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1.0'
+    #       memory: 2G
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network configuration
+    networks:
+      - tradebot-network
+
+  # ============================================================
+  # PostgreSQL Database (Optional - Phase 12)
+  # ============================================================
+  # Uncomment to enable database for trade history persistence
+  # Currently commented out as Phase 11 doesn't require it
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: llm-tradebot-postgres
+  #
+  #   environment:
+  #     POSTGRES_DB: tradebot
+  #     POSTGRES_USER: tradebot
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+  #
+  #   ports:
+  #     - "5432:5432"
+  #
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #
+  #   restart: unless-stopped
+  #
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U tradebot"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #
+  #   networks:
+  #     - tradebot-network
+
+# ============================================================
+# Networks
+# ============================================================
+networks:
+  tradebot-network:
+    driver: bridge
+
+# ============================================================
+# Volumes
+# ============================================================
+# Named volumes for persistent data
+# Uncomment postgres-data when enabling postgres service
+volumes:
+  # postgres-data:
+  #   driver: local
+
+  # Note: models/, data/, logs/ use bind mounts from host
+  # This allows direct access to files for development and debugging

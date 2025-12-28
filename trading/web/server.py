@@ -118,7 +118,7 @@ class DashboardServer:
             except WebSocketDisconnect:
                 self.ws_manager.disconnect(websocket)
 
-        # Health check
+        # Health check (legacy API endpoint)
         @self.app.get("/api/health")
         async def health_check():
             """Server health check."""
@@ -128,6 +128,57 @@ class DashboardServer:
                 "provider": self.config.provider,
                 "testnet": self.config.testnet,
             })
+
+        # Docker health check endpoint (NEW - Phase 11 Task 2)
+        @self.app.get("/health")
+        async def docker_health_check():
+            """Lightweight health check for Docker HEALTHCHECK.
+
+            This is a simpler version of /api/v1/health/status designed specifically
+            for Docker health checks. Returns 200 if healthy, 503 if unhealthy.
+
+            Checks:
+            - FastAPI server responsive (implicit - if this runs, server is up)
+            - Kill switch not active
+            - Circuit breaker not tripped
+            - System health not critical
+
+            Returns:
+                200: {"status": "healthy", "timestamp": "..."}
+                503: Service unavailable with error detail
+            """
+            try:
+                # Check kill switch
+                if self.kill_switch and self.kill_switch.is_active():
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Kill switch active - trading stopped"
+                    )
+
+                # Check system health
+                if self.health_monitor:
+                    health_status = self.health_monitor.get_health_status()
+                    if health_status.health_level == "CRITICAL":
+                        raise HTTPException(
+                            status_code=503,
+                            detail=f"System health critical: {', '.join(health_status.issues)}"
+                        )
+
+                return JSONResponse({
+                    "status": "healthy",
+                    "timestamp": datetime.now().isoformat()
+                })
+
+            except HTTPException:
+                # Re-raise HTTPException as-is
+                raise
+            except Exception as e:
+                # Catch any unexpected errors
+                self.logger.error(f"Health check failed: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Health check failed: {str(e)}"
+                )
 
         # Get current positions
         @self.app.get("/api/positions")

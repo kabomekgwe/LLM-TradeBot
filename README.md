@@ -2,6 +2,29 @@
 
 Multi-platform algorithmic trading system powered by an 8-agent adversarial decision framework.
 
+## Quick Start with Docker
+
+The fastest way to get started is using Docker:
+
+```bash
+# Copy environment template
+cp .env.production.template .env
+
+# Edit .env and add your API keys (or use TRADING_PROVIDER=paper for testing)
+nano .env
+
+# Start with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Access dashboard
+open http://localhost:5173
+```
+
+For detailed deployment instructions, see [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Features
 
 - **8-Agent Adversarial System**: Bull vs Bear agents with regime-aware decision making
@@ -119,6 +142,33 @@ insights = detector.generate_all_insights()
 # - Symbol-specific patterns
 ```
 
+## Docker Deployment
+
+### Local Development
+
+```bash
+# Quick start
+./scripts/deploy-local.sh
+
+# Or manually
+docker-compose build
+docker-compose up -d
+docker-compose logs -f
+```
+
+### Production Deployment
+
+```bash
+# On production server
+./scripts/deploy-production.sh
+
+# Or manually
+docker-compose build
+docker-compose up -d
+```
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for complete deployment guide and [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) for pre-deployment checklist.
+
 ## Directory Structure
 
 ```
@@ -135,11 +185,21 @@ LLM-TradeBot/
 │   ├── models/                # Data models
 │   ├── memory/                # Trade journaling & learning
 │   ├── risk/                  # Risk management
+│   ├── web/                   # Dashboard server
+│   ├── utils/                 # Utilities (shutdown handler, etc.)
 │   └── cli.py                 # Command-line interface
 ├── config/                    # Configuration files
 │   └── .env.example
-├── examples/                  # Usage examples
+├── scripts/                   # Deployment scripts
+│   ├── docker-build.sh
+│   ├── deploy-local.sh
+│   └── deploy-production.sh
 ├── docs/                      # Documentation
+│   ├── DEPLOYMENT.md
+│   └── PRODUCTION_CHECKLIST.md
+├── Dockerfile                 # Multi-stage Docker build
+├── docker-compose.yml         # Container orchestration
+├── examples/                  # Usage examples
 └── tests/                     # Test suite
 ```
 

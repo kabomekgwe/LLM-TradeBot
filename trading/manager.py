@@ -40,6 +40,9 @@ from .monitoring.alert_manager import AlertManager
 # Import notifications
 from .notifications.manager import NotificationManager
 
+# Import graceful shutdown handler (Phase 11)
+from .utils.shutdown import GracefulShutdownHandler
+
 # Import all 8 agents
 from .agents.data_sync import DataSyncAgent
 from .agents.quant_analyst import QuantAnalystAgent
@@ -169,6 +172,14 @@ class TradingManager:
             "risk_audit": RiskAuditAgent(self.provider, self.config),
             "execution": ExecutionEngine(self.provider, self.config),
         }
+
+        # Initialize graceful shutdown handler (Phase 11 Task 2)
+        self.shutdown_handler = GracefulShutdownHandler(
+            manager=self,
+            timeout=30
+        )
+        self.shutdown_handler.register()
+        self.logger.info("graceful_shutdown_handler_initialized")
 
         # Initialize state if first run
         if not self.state.initialized:

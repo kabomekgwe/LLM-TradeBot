@@ -1,0 +1,130 @@
+# .dockerignore - Exclude files from Docker build context
+# Reduces build context size and speeds up image builds
+
+# ============================================================
+# Version Control
+# ============================================================
+.git/
+.gitignore
+.gitattributes
+
+# ============================================================
+# Planning and Documentation
+# ============================================================
+.planning/
+docs/
+*.md
+!README.md  # Include README for reference
+
+# ============================================================
+# Testing
+# ============================================================
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ============================================================
+# Python Cache and Build Artifacts
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ============================================================
+# Virtual Environments
+# ============================================================
+.venv/
+venv/
+ENV/
+env/
+
+# ============================================================
+# IDE and Editor Files
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============================================================
+# Environment and Secrets
+# ============================================================
+# Exclude .env files - they will be mounted separately
+.env
+.env.*
+*.pem
+*.key
+*.p12
+credentials.json
+secrets/
+
+# ============================================================
+# Application Data
+# ============================================================
+# Exclude runtime data - will be mounted as volumes
+data/
+logs/
+*.log
+*.db
+*.sqlite
+.trading_state.json
+.trading_state_*.json
+
+# ============================================================
+# ML Models
+# ============================================================
+# Exclude large model files - will be mounted as volumes
+models/*.pth
+models/*.pkl
+models/*.bin
+models/*.txt
+# Keep models/ directory structure
+!models/.gitkeep
+
+# ============================================================
+# Docker Files
+# ============================================================
+# Exclude Docker-related files from build context
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.tar  # Docker image exports
+
+# ============================================================
+# Examples and Demos
+# ============================================================
+examples/
+demos/
+
+# ============================================================
+# Temporary Files
+# ============================================================
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp

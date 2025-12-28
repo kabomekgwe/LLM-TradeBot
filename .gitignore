@@ -61,6 +61,10 @@ data/
 trading/ml/models/*.txt
 trading/ml/models/*.bin
 
+# Docker-related
+*.tar  # Docker image exports
+.env.production  # Production secrets (use .env.production.template)
+
 # OS
 .DS_Store
 Thumbs.db
